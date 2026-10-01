@@ -1,0 +1,41 @@
+# Skeleton written during the P2c rehearsal. NOT RUN: there is no remote and no runner. Every step is a command that
+# was run locally against the rehearsal repository (see the rehearsal report); the workflow wiring itself is untested.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+          components: rustfmt, clippy
+      - run: ./scripts/check-all.sh
+      - run: python3 scripts/tests/test_dependency_rules.py
+      - run: node --test scripts/tests/test-local-app-r4-libs.mjs
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace --no-fail-fast
+      # The service without its default features: no libgit2 in the graph.
+      - run: cargo test --locked -p local-app-service --no-default-features --lib
