@@ -154,3 +154,34 @@ pub fn is_local_app_tool_name(value: &str) -> bool {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || (byte == b'_' && index > 0)
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The names below are persisted in saved conversations and approvals and spoken by the model; they moved
+    // here from the engine's registry tests, which no longer know what the servers are.
+    #[test]
+    fn conversation_export_identity_preserves_hyphens_and_split_boundaries() {
+        let scope = ConversationExport::new("abc--1", "0".repeat(64)).unwrap();
+        assert_eq!(scope.server_name(), "local_app_abc--1");
+        assert_eq!(scope.server_info_name(), "lingxi-local-app");
+        assert_eq!(scope.registry_key(), "local_apps:conversation-export:abc--1");
+        assert_eq!(
+            scope.tool_full_name("read_value").unwrap(),
+            "mcp__local_app_abc--1__read_value"
+        );
+        assert!(ConversationExport::new("abc_1", "0".repeat(64)).is_err());
+        assert!(scope.tool_full_name("bad__name").is_err());
+    }
+
+    #[test]
+    fn conversation_export_uses_schema_v3_app_id_boundaries() {
+        let id_54 = format!("a{}", "b".repeat(53));
+        let id_55 = format!("a{}", "b".repeat(54));
+        assert!(ConversationExport::new(id_54, "0".repeat(64)).is_ok());
+        assert!(ConversationExport::new(id_55, "0".repeat(64)).is_err());
+        assert!(ConversationExport::new("A123", "0".repeat(64)).is_err());
+        assert!(ConversationExport::new("-leading", "0".repeat(64)).is_err());
+    }
+}
