@@ -1,0 +1,25 @@
+[package]
+name = "local-app-cli"
+version = "0.12.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The `local-app` command: runs the Local App service outside LingXi."
+
+# A leaf of the workspace: nothing depends on it (check_deps.py R7). It has no dependencies yet; the service
+# comes in with the local host (T1) and the stdio MCP transport (T2).
+[lib]
+name = "local_app_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "local-app"
+path = "src/main.rs"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3.13"
+
+[lints]
+workspace = true

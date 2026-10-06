@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/device-api",
+    "crates/local-app-cli",
     "crates/local-app-contracts",
     "crates/local-app-plugin",
     "crates/local-app-service",

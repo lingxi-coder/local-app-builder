@@ -18,6 +18,7 @@ workspace and is not a decision, and there is deliberately no LICENSE file; deci
 | `crates/local-app-contracts` | ids and the vocabulary shared by the service and its hosts; no dependencies |
 | `crates/local-apps` | the core: app state, persistence (SQLite), checkpoints, authoring/QA and MCP-authoring rules, the plugin packer |
 | `crates/local-app-service` | orchestration: the broker, the build pipeline, the in-process MCP server, and the seams a host implements |
+| `crates/local-app-cli` | the `local-app` command (a leaf; nothing depends on it): `version`, `doctor`; the local host and the stdio MCP server come next |
 | `crates/device-api` | device capability traits |
 | `crates/mcp-wire` | MCP wire types and the in-process transport traits |
 | `crates/rooted-fs` | rooted file operations: containment, atomic writes, file locks |

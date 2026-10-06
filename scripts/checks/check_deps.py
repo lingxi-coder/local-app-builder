@@ -13,6 +13,8 @@ the reason this repository can be built, tested and released without it.
   R5  libgit2 is reached through a feature of local-apps only: the graph that links it chooses where it comes from
   R6  the project's graph is self-contained: no dependency may come from a git source or from a path outside this
       repository. A path or git dependency on the engine (or on a product crate) is exactly what this rule exists for.
+  R7  local-app-cli is a leaf: no other workspace crate depends on it. The command line sits above the service and
+      may use any of it, but nothing may be built on top of a binary's crate.
 """
 import json
 import os
@@ -22,6 +24,7 @@ PRIMITIVES = {"device-api", "local-app-contracts", "mcp-wire", "rooted-fs"}
 CORE = "local-apps"
 SERVICE = "local-app-service"
 PLUGIN = "local-app-plugin"
+CLI = "local-app-cli"
 GATED = {CORE: {"git2"}}
 
 
@@ -54,6 +57,9 @@ def main():
                 if d["name"] == CORE and d.get("kind") != "dev" and d.get("uses_default_features", True):
                     violations.append("%s depends on %s with its default features — a consumer could not turn them off"
                                       % (n, CORE))
+        if CLI in deps and n != CLI:
+            violations.append("%s depends on %s — the command line is a leaf; nothing may be built on top of it"
+                              % (n, CLI))
         if n == PLUGIN and [d for d in p["dependencies"] if d.get("kind") != "dev"]:
             violations.append("%s must have no dependencies" % n)
         for d in p["dependencies"]:

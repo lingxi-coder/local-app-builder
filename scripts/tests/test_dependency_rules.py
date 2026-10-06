@@ -24,7 +24,7 @@ class DependencyRules(unittest.TestCase):
 
     def members(self, **edges):
         base = {n: [] for n in ("device-api", "local-app-contracts", "mcp-wire", "rooted-fs", "local-apps",
-                                "local-app-service", "local-app-plugin")}
+                                "local-app-service", "local-app-plugin", "local-app-cli")}
         base.update(edges)
         return base
 
@@ -64,6 +64,17 @@ class DependencyRules(unittest.TestCase):
         result = self.run_gate(self.members(**{"local-app-plugin": ["serde"]}))
         self.assertEqual(result.returncode, 1)
         self.assertIn("local-app-plugin must have no dependencies", result.stderr)
+
+    def test_nothing_may_depend_on_the_command_line(self):
+        result = self.run_gate(self.members(**{"local-app-service": ["local-app-cli"]}))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("local-app-service depends on local-app-cli — the command line is a leaf", result.stderr)
+
+    def test_the_command_line_may_use_the_service_and_the_core(self):
+        result = self.run_gate(self.members(**{
+            "local-app-cli": [{"name": "local-app-service"}, {"name": "local-apps", "uses_default_features": False}],
+        }))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_libgit2_stays_behind_its_feature(self):
         result = self.run_gate(self.members(**{"local-apps": [{"name": "git2", "optional": False}]}))
