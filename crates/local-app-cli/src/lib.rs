@@ -15,7 +15,7 @@ mod writer_lock;
 
 pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
 pub use doctor::{run_doctor, run_doctor_with, Check, CheckStatus, Report};
-pub use mcp_backend::{LocalAppBackend, UnsupportedHost, UNSUPPORTED};
+pub use mcp_backend::{LocalAppBackend, UnsupportedHost, SERVED, UNSUPPORTED};
 pub use mcp_protocol::{
     CallError, Reply, ServerIdentity, Session, ToolBackend, ToolResult, ToolSpec, LEGACY_VERSION, MODERN_VERSION,
     SUPPORTED_VERSIONS,
@@ -158,9 +158,9 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
 }
 
 /// The instructions an MCP client shows the model.
-const MCP_INSTRUCTIONS: &str = "Local App tools. This server can list and read Local Apps; it cannot build, run, \
-or change them yet. A tool that needs a runtime, a screen or the person's approval answers \
-`unsupported_on_this_host`.";
+const MCP_INSTRUCTIONS: &str = "Local App tools. This server can list Local Apps and read an app's record, logs, \
+checkpoints and background tasks. It cannot create, build, run or change apps yet, and the tools for that are not \
+listed.";
 
 fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
     let mut flag_root: Option<String> = None;

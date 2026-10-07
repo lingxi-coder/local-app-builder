@@ -107,7 +107,7 @@
         "id": 4,
         "method": "tools/call",
         "params": {
-          "name": "LocalAppInspectUi",
+          "name": "LocalAppGet",
           "arguments": {
             "app_id": "any-app"
           },

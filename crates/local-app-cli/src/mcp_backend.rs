@@ -7,7 +7,9 @@
 //! ([`UNSUPPORTED`]) instead of failing in some way a model would have to guess at. What remains is what the service
 //! answers from its own store: listing and reading apps.
 //!
-//! **Only read-only operations are offered.** The service has mutating operations that need no host at all
+//! **Only read-only operations that work here are offered.** A tool that would answer `unsupported_on_this_host` to
+//! every call is not listed: it costs the model context and invites a call that cannot succeed. [`SERVED`] names what
+//! is offered; each addition comes with the capability that makes it work. The service has mutating operations that need no host at all
 //! (`create`, `scaffold`, `update_manifest`), and nothing here yet stops two `local-app` processes — one per
 //! client, since each of Codex and Claude Code starts its own — from writing the same data root at once. The
 //! write lock that makes one writer of the data root arrives with the local host (T1); until then a tool that
@@ -25,6 +27,26 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+
+/// The service operations this host offers: the read-only ones that answer from the service's own store, with no
+/// runtime, screen or approval behind them. A test calls every one of them.
+pub const SERVED: &[&str] = &[
+    "list",
+    "get",
+    "read_logs",
+    "list_checkpoints",
+    "background_list",
+    "background_status",
+];
+
+/// Descriptions that replace the service's where it was written for the LingXi app. The service's own text stays
+/// as it is, because LingXi still uses it; this host speaks to any MCP client.
+const DESCRIPTIONS: &[(&str, &str)] = &[(
+    "list",
+    "List the Local Apps in this data root (id, name, brief). Read-only. The page is bounded by `limit` (default 50, \
+     max 100); when `has_more` is true, narrow the list with `query`. Use it to find an app's id; the other tools \
+     take that id.",
+)];
 
 /// What a model reads when it asks this host for something that needs a capability the command line lacks.
 pub const UNSUPPORTED: &str = "unsupported_on_this_host: the `local-app` command line has no way to do this yet \
@@ -112,7 +134,7 @@ impl LocalAppBackend {
         let mut tools = Vec::new();
         let mut operations = HashMap::new();
         for (name, operation, read_only) in LOCAL_APP_TOOLS {
-            if !read_only {
+            if !read_only || !SERVED.contains(operation) {
                 continue;
             }
             let definition = catalog
@@ -121,7 +143,10 @@ impl LocalAppBackend {
             tools.push(ToolSpec {
                 name: (*name).to_string(),
                 title: None,
-                description: definition.description.clone(),
+                description: DESCRIPTIONS
+                    .iter()
+                    .find(|(op, _)| op == operation)
+                    .map_or_else(|| definition.description.clone(), |(_, text)| (*text).to_string()),
                 input_schema: definition.input_schema.clone(),
                 output_schema: definition.output_schema.clone(),
                 read_only: true,
@@ -172,17 +197,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_read_only_operations_are_offered() {
+    async fn only_read_only_operations_that_work_here_are_offered() {
         let (_root, backend) = backend().await;
         let names: Vec<String> = backend.tools().into_iter().map(|t| t.name).collect();
-        assert!(names.contains(&"LocalAppList".to_string()), "{names:?}");
-        assert!(names.contains(&"LocalAppGet".to_string()), "{names:?}");
-        let read_only: Vec<&str> = LOCAL_APP_TOOLS.iter().filter(|(_, _, ro)| *ro).map(|(n, _, _)| *n).collect();
-        assert_eq!(names.len(), read_only.len());
-        for (name, _, ro) in LOCAL_APP_TOOLS {
-            assert_eq!(names.iter().any(|n| n == name), *ro, "{name}");
+        let expected: Vec<&str> = LOCAL_APP_TOOLS
+            .iter()
+            .filter(|(_, operation, read_only)| *read_only && SERVED.contains(operation))
+            .map(|(name, _, _)| *name)
+            .collect();
+        assert_eq!(expected.len(), SERVED.len(), "every served operation has a read-only tool row");
+        assert_eq!(names.len(), expected.len(), "{names:?}");
+        for name in &expected {
+            assert!(names.iter().any(|n| n == name), "{name} missing from {names:?}");
         }
         assert!(backend.tools().iter().all(|t| t.read_only && !t.description.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn nothing_offered_is_worded_for_another_product() {
+        let (_root, backend) = backend().await;
+        for tool in backend.tools() {
+            let text = format!("{} {} {:?} {:?}", tool.name, tool.description, tool.input_schema, tool.output_schema).to_lowercase();
+            for word in ["lingxi", "global conversation", "workspace contract"] {
+                assert!(!text.contains(word), "{} mentions `{word}`: {text}", tool.name);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn every_offered_tool_answers_for_real_and_none_says_unsupported() {
+        // A tool that is listed must work. Each is called with the arguments it needs on an empty store: it may
+        // say the app does not exist, but never that this host cannot do it.
+        let (_root, backend) = backend().await;
+        for tool in backend.tools() {
+            let required: Vec<String> = tool.input_schema["required"]
+                .as_array()
+                .map(|r| r.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let arguments: serde_json::Map<String, Value> = required.iter().map(|key| (key.clone(), json!("no-such-app"))).collect();
+            let result = backend.call(&tool.name, Value::Object(arguments)).await.unwrap_or_else(|e| panic!("{}: {e:?}", tool.name));
+            let text = serde_json::to_string(&result.content).unwrap();
+            assert!(!text.contains("unsupported_on_this_host"), "{} is listed but unsupported: {text}", tool.name);
+        }
     }
 
     #[tokio::test]
@@ -222,20 +278,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_operation_that_needs_a_screen_or_a_runtime_says_so_by_name() {
+    async fn an_operation_that_needs_a_screen_or_a_runtime_is_not_offered_at_all() {
         let (_root, backend) = backend().await;
-        for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppRuntimeProfiles"] {
-            let result = backend.call(name, json!({"app_id": "any-app"})).await;
-            match result {
-                Ok(result) => {
-                    assert!(result.is_error, "{name}: {result:?}");
-                    let text = result.content[0]["text"].as_str().unwrap_or_default().to_string();
-                    // An unknown app may be reported before the host is asked; either way the answer is an
-                    // explicit refusal, never silence.
-                    assert!(!text.is_empty(), "{name}");
-                }
-                Err(error) => panic!("{name}: a refusal must be a readable result, got {error:?}"),
-            }
+        for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppRuntimeProfiles", "LocalAppTemplateCatalog", "LocalAppQaReadEvidence"] {
+            assert_eq!(backend.call(name, json!({"app_id": "any-app"})).await.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
         }
     }
 
