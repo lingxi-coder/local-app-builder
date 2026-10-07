@@ -24,7 +24,7 @@ class DependencyRules(unittest.TestCase):
 
     def members(self, **edges):
         base = {n: [] for n in ("device-api", "local-app-contracts", "mcp-wire", "rooted-fs", "local-apps",
-                                "local-app-service", "local-app-plugin", "local-app-cli")}
+                                "local-app-service", "local-app-plugin", "local-app-cli", "local-app-host")}
         base.update(edges)
         return base
 
@@ -75,6 +75,27 @@ class DependencyRules(unittest.TestCase):
             "local-app-cli": [{"name": "local-app-service"}, {"name": "local-apps", "uses_default_features": False}],
         }))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_host_may_use_the_service_and_the_primitives_and_the_command_line_may_use_the_host(self):
+        result = self.run_gate(self.members(**{
+            "local-app-host": ["local-app-service", "local-app-contracts"],
+            "local-app-cli": [{"name": "local-app-host"}, {"name": "local-app-service"}],
+        }))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_the_host_cannot_reach_the_core_or_the_command_line(self):
+        for bad in ("local-apps", "local-app-cli", "local-app-plugin"):
+            result = self.run_gate(self.members(**{"local-app-host": [bad]}))
+            self.assertEqual(result.returncode, 1, bad)
+            self.assertIn("local-app-host depends on %s — the host reaches the workspace only through" % bad,
+                          result.stderr)
+
+    def test_nothing_but_the_command_line_may_depend_on_the_host(self):
+        for crate in ("local-app-service", "local-apps", "mcp-wire"):
+            result = self.run_gate(self.members(**{crate: ["local-app-host"]}))
+            self.assertEqual(result.returncode, 1, crate)
+            self.assertIn("%s depends on local-app-host — only the command line is built on the host" % crate,
+                          result.stderr)
 
     def test_libgit2_stays_behind_its_feature(self):
         result = self.run_gate(self.members(**{"local-apps": [{"name": "git2", "optional": False}]}))

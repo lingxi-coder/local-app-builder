@@ -15,6 +15,9 @@ the reason this repository can be built, tested and released without it.
       repository. A path or git dependency on the engine (or on a product crate) is exactly what this rule exists for.
   R7  local-app-cli is a leaf: no other workspace crate depends on it. The command line sits above the service and
       may use any of it, but nothing may be built on top of a binary's crate.
+  R8  local-app-host (what a Mac provides the service: the isolated command executor) sits between the service and the
+      command line: it reaches the workspace only through the primitives and the service, and only the command line
+      depends on it. The service never learns which host it runs on.
 """
 import json
 import os
@@ -25,6 +28,7 @@ CORE = "local-apps"
 SERVICE = "local-app-service"
 PLUGIN = "local-app-plugin"
 CLI = "local-app-cli"
+HOST = "local-app-host"
 GATED = {CORE: {"git2"}}
 
 
@@ -57,6 +61,13 @@ def main():
                 if d["name"] == CORE and d.get("kind") != "dev" and d.get("uses_default_features", True):
                     violations.append("%s depends on %s with its default features — a consumer could not turn them off"
                                       % (n, CORE))
+        if n == HOST:
+            bad = [d for d in deps if d not in PRIMITIVES | {SERVICE}]
+            if bad:
+                violations.append("%s depends on %s — the host reaches the workspace only through the primitives and %s"
+                                  % (n, ", ".join(bad), SERVICE))
+        if HOST in deps and n != CLI:
+            violations.append("%s depends on %s — only the command line is built on the host" % (n, HOST))
         if CLI in deps and n != CLI:
             violations.append("%s depends on %s — the command line is a leaf; nothing may be built on top of it"
                               % (n, CLI))
