@@ -135,7 +135,7 @@
         "id": 5,
         "method": "tools/call",
         "params": {
-          "name": "LocalAppBuild",
+          "name": "LocalAppRuntime",
           "arguments": {
             "app_id": "any-app"
           },
@@ -153,7 +153,7 @@
         "id": 5,
         "error": {
           "code": -32602,
-          "message": "Unknown tool: LocalAppBuild"
+          "message": "Unknown tool: LocalAppRuntime"
         }
       }
     },

@@ -9,6 +9,7 @@
 
 mod executor;
 mod path_map;
+mod provisioned;
 mod seatbelt;
 mod toolchain;
 mod watchdog;
@@ -17,6 +18,7 @@ pub use executor::{
     LocalExecutor, LocalExecutorConfig, KILLED_EXIT_CODE, OUTPUT_CAP_BYTES, TIMED_OUT_EXIT_CODE,
 };
 pub use path_map::{PathMap, Toolchain};
+pub use provisioned::ProvisionedExecutor;
 pub use seatbelt::{Policy, Profile, SANDBOX_EXEC};
 pub use toolchain::{
     Artifact, Platform, ProgramRecord, Receipt, Source, Spec, Status, ToolchainError, Toolchains, INSTALL_LOCK_FILE,

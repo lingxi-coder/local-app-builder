@@ -10,7 +10,7 @@
 //! it is in the file, so that a process that cannot have the lock can say whom to wait for. That record is a courtesy
 //! to the reader of an error message; the lock is the only authority.
 //!
-//! This is not [`crate::OpenLock`], which only serialises the opening of the store.
+//! The data root is loaded only while this lock is held (see `lease`).
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -153,13 +153,5 @@ mod tests {
         };
         assert_eq!(holder, Holder { pid: None, since_unix: None });
         assert_eq!(holder.describe(), "another process");
-    }
-
-    #[test]
-    fn the_lock_does_not_depend_on_the_open_lock() {
-        let root = tempfile::tempdir().unwrap();
-        let _writer = acquired(root.path());
-        let open = crate::OpenLock::acquire(root.path(), std::time::Duration::from_secs(1));
-        assert!(open.is_ok(), "opening the store must not wait on the writer: {open:?}");
     }
 }

@@ -108,7 +108,7 @@
         "id": 6,
         "method": "tools/call",
         "params": {
-          "name": "LocalAppCreate",
+          "name": "LocalAppScaffold",
           "arguments": {
             "name": "x"
           }
@@ -118,7 +118,7 @@
         "id": 6,
         "error": {
           "code": -32602,
-          "message": "Unknown tool: LocalAppCreate"
+          "message": "Unknown tool: LocalAppScaffold"
         }
       }
     }

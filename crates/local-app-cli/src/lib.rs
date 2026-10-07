@@ -6,16 +6,19 @@
 
 mod data_root;
 mod doctor;
+mod lease;
+mod local_host;
 mod mcp_backend;
 mod mcp_protocol;
 mod mcp_stdio;
-mod open_lock;
 mod toolchain_command;
 mod writer_lock;
 
 pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
 pub use doctor::{run_doctor, run_doctor_with, Check, CheckStatus, Report};
-pub use mcp_backend::{LocalAppBackend, UnsupportedHost, SERVED, UNSUPPORTED};
+pub use lease::{Lease, LeaseError, Use, LEASE_IDLE, LEASE_WAIT};
+pub use local_host::{within_call, ApprovalSink, CatalogBundle, HostConfig, LocalHost};
+pub use mcp_backend::{LocalAppBackend, MAX_PLAN_BYTES, SERVED_READ, SERVED_WRITE};
 pub use mcp_protocol::{
     Approval, ApprovalRequest, Approver, CallContext, CallError, ClientLink, LinkError, NoApprover, Reply, ServerIdentity,
     Session, ToolBackend, ToolResult, ToolSpec, APPROVAL_TIMEOUT, LEGACY_VERSION, MODERN_VERSION,
@@ -23,12 +26,12 @@ pub use mcp_protocol::{
 };
 pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
 pub use toolchain_command::run_toolchain;
-pub use open_lock::{OpenLock, OPEN_LOCK_FILE, OPEN_LOCK_TIMEOUT};
 pub use writer_lock::{Attempt as WriterAttempt, Holder as WriterHolder, WriterLock, WRITER_LOCK_FILE};
 
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// What the command may see of its surroundings.
 #[derive(Debug, Clone, Default)]
@@ -158,10 +161,33 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
     u8::from(report.has_failure())
 }
 
-/// The instructions an MCP client shows the model.
-const MCP_INSTRUCTIONS: &str = "Local App tools. This server can list Local Apps and read an app's record, logs, \
-checkpoints and background tasks. It cannot create, build, run or change apps yet, and the tools for that are not \
-listed.";
+/// How builds run on this machine: the pinned toolchain under the data root, checked on first use. A machine with no
+/// pinned toolchain (not a Mac) has no executor, and builds say so.
+fn host_config(root: &std::path::Path, env: &Env) -> HostConfig {
+    let executor = local_app_host::Platform::host().ok().map(|platform| {
+        let mut private = vec![root.to_path_buf()];
+        private.extend(env.var("HOME").map(PathBuf::from));
+        Arc::new(local_app_host::ProvisionedExecutor::new(
+            local_app_host::Toolchains::in_data_root(root),
+            local_app_host::Spec::pinned(platform),
+            private,
+        )) as Arc<dyn local_app_service::host::BuildExecutor>
+    });
+    HostConfig { executor }
+}
+
+/// The instructions an MCP client shows the model. They name the data root, because an app's workspace is a directory
+/// under it that the model edits with its own file tools.
+fn mcp_instructions(root: &std::path::Path) -> String {
+    format!(
+        "Local App tools. This server lists Local Apps and reads an app's record, logs, checkpoints and background \
+tasks, and it can create an app, prepare it from a plan the person approves, install its dependencies and build it. \
+Approval is asked of the person through the client (MCP elicitation); a client that cannot ask cannot approve, and \
+then the action is not done. It cannot run an app or drive its screen yet. The data root is {}: an app's workspace is \
+<data root>/<the `workspaceRel` that LocalAppGet reports>, and its LINGXI.md there is the app's own contract.",
+        root.display()
+    )
+}
 
 fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
     let mut flag_root: Option<String> = None;
@@ -196,18 +222,11 @@ fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
         }
     };
     let result = runtime.block_on(async {
-        // Held only while the store opens: see `open_lock`.
-        let lock_root = root.path.clone();
-        let lock = tokio::task::spawn_blocking(move || OpenLock::acquire(&lock_root, OPEN_LOCK_TIMEOUT))
-            .await
-            .map_err(|error| format!("waiting for the data root: {error}"))??;
-        let backend = LocalAppBackend::open(&root.path).await;
-        drop(lock);
-        let backend = backend?;
+        let backend = LocalAppBackend::open(&root.path, host_config(&root.path, env)).await?;
         let identity = ServerIdentity {
             name: "local-app".into(),
             version: VERSION.into(),
-            instructions: Some(MCP_INSTRUCTIONS.into()),
+            instructions: Some(mcp_instructions(&root.path)),
         };
         let session = std::sync::Arc::new(Session::new(std::sync::Arc::new(backend), identity));
         serve(session, tokio::io::stdin(), tokio::io::stdout()).await.map_err(|error| format!("stdio failed: {error}"))
