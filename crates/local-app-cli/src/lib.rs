@@ -6,9 +6,20 @@
 
 mod data_root;
 mod doctor;
+mod mcp_backend;
+mod mcp_protocol;
+mod mcp_stdio;
+mod open_lock;
 
 pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
 pub use doctor::{run_doctor, Check, CheckStatus, Report};
+pub use mcp_backend::{LocalAppBackend, UnsupportedHost, UNSUPPORTED};
+pub use mcp_protocol::{
+    CallError, Reply, ServerIdentity, Session, ToolBackend, ToolResult, ToolSpec, LEGACY_VERSION, MODERN_VERSION,
+    SUPPORTED_VERSIONS,
+};
+pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
+pub use open_lock::{OpenLock, OPEN_LOCK_FILE, OPEN_LOCK_TIMEOUT};
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -62,12 +73,15 @@ USAGE:
     local-app <COMMAND> [OPTIONS]
 
 COMMANDS:
+    mcp        Serve the Local App tools to an MCP client over stdio
     doctor     Check this machine and the data root
     version    Print the version
     help       Print this message
 
-OPTIONS (doctor):
+OPTIONS (mcp, doctor):
     --data-root <DIR>   Use this data root instead of the default
+
+OPTIONS (doctor):
     --json              Print the report as JSON
 ";
 
@@ -91,6 +105,7 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
             0
         }
         "doctor" => doctor_command(rest, env, out, err),
+        "mcp" => mcp_command(rest, env, err),
         other => {
             let _ = writeln!(err, "local-app: unknown command `{other}`\n");
             let _ = err.write_all(USAGE.as_bytes());
@@ -130,4 +145,67 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
     let rendered = if json { report.to_json() } else { report.to_text() };
     let _ = out.write_all(rendered.as_bytes());
     u8::from(report.has_failure())
+}
+
+/// The instructions an MCP client shows the model.
+const MCP_INSTRUCTIONS: &str = "Local App tools. This server can list and read Local Apps; it cannot build, run, \
+or change them yet. A tool that needs a runtime, a screen or the person's approval answers \
+`unsupported_on_this_host`.";
+
+fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
+    let mut flag_root: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--data-root" => match it.next() {
+                Some(v) => flag_root = Some(v.clone()),
+                None => {
+                    let _ = writeln!(err, "local-app mcp: --data-root needs a directory");
+                    return 2;
+                }
+            },
+            other => {
+                let _ = writeln!(err, "local-app mcp: unknown option `{other}`");
+                return 2;
+            }
+        }
+    }
+    let root = match resolve_data_root(flag_root.as_deref(), env) {
+        Ok(root) => root,
+        Err(message) => {
+            let _ = writeln!(err, "local-app mcp: {message}");
+            return 1;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = writeln!(err, "local-app mcp: cannot start the async runtime: {error}");
+            return 1;
+        }
+    };
+    let result = runtime.block_on(async {
+        // Held only while the store opens: see `open_lock`.
+        let lock_root = root.path.clone();
+        let lock = tokio::task::spawn_blocking(move || OpenLock::acquire(&lock_root, OPEN_LOCK_TIMEOUT))
+            .await
+            .map_err(|error| format!("waiting for the data root: {error}"))??;
+        let backend = LocalAppBackend::open(&root.path).await;
+        drop(lock);
+        let backend = backend?;
+        let identity = ServerIdentity {
+            name: "local-app".into(),
+            version: VERSION.into(),
+            instructions: Some(MCP_INSTRUCTIONS.into()),
+        };
+        let session = std::sync::Arc::new(Session::new(std::sync::Arc::new(backend), identity));
+        serve(session, tokio::io::stdin(), tokio::io::stdout()).await.map_err(|error| format!("stdio failed: {error}"))
+    });
+    match result {
+        Ok(()) => 0,
+        Err(message) => {
+            let _ = writeln!(err, "local-app mcp: {message}");
+            1
+        }
+    }
 }

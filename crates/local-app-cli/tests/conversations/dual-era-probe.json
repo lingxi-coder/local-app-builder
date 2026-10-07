@@ -1,0 +1,59 @@
+{
+  "description": "A dual-era client probing a modern server on stdio: server/discover first, stays modern, never falls back to initialize.",
+  "client": {
+    "name": "SpecExample",
+    "version": "dual-era",
+    "protocol": "2026-07-28"
+  },
+  "steps": [
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": "probe",
+        "method": "server/discover",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": "probe",
+        "result": {
+          "supportedVersions": [
+            "2026-07-28",
+            "2025-11-25"
+          ]
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 2,
+        "result": {
+          "resultType": "complete"
+        }
+      }
+    }
+  ]
+}
