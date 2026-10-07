@@ -9907,6 +9907,71 @@ fn dependency_native_bindings_accept_each_pinned_version_only() {
     }
 }
 
+/// The `name@version` of every darwin or musl platform package that the template lockfiles pin, and how many lockfiles
+/// were read. `@pnpm/exe.*` are pnpm's own standalone executables, which hold no Node addon.
+fn locked_platform_packages() -> (std::collections::BTreeSet<(String, String)>, usize) {
+    fn lockfiles(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if !matches!(path.file_name().and_then(|n| n.to_str()), Some("node_modules" | "target")) {
+                    lockfiles(&path, found);
+                }
+            } else if path.file_name().is_some_and(|n| n == "pnpm-lock.yaml") {
+                found.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    lockfiles(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."), &mut files);
+    let mut platform = std::collections::BTreeSet::new();
+    for file in &files {
+        let text = fs::read_to_string(file).unwrap();
+        let mut in_packages = false;
+        let mut key: Option<String> = None;
+        for line in text.lines() {
+            if !line.starts_with(' ') && !line.is_empty() {
+                in_packages = line == "packages:";
+                key = None;
+            } else if in_packages && line.starts_with("  ") && !line.starts_with("   ") {
+                key = Some(line.trim().trim_end_matches(':').trim_matches('\'').to_string());
+            } else if in_packages && (line.trim() == "os: [darwin]" || line.trim() == "libc: [musl]") {
+                let key = key.as_deref().expect("a platform field belongs to a package");
+                let (name, version) = key.rsplit_once('@').expect("name@version");
+                if !name.starts_with("@pnpm/exe.") {
+                    platform.insert((name.to_string(), version.to_string()));
+                }
+            }
+        }
+    }
+    (platform, files.len())
+}
+
+#[test]
+fn trusted_native_bindings_are_exactly_the_platform_packages_the_template_lockfiles_pin() {
+    let (locked, lockfile_count) = locked_platform_packages();
+    assert!(lockfile_count >= 16, "the lockfile walk found only {lockfile_count}; the check would be vacuous");
+    let trusted: std::collections::BTreeSet<(String, String)> = TRUSTED_TOOLCHAIN_NATIVE_BINDINGS
+        .iter()
+        .map(|(package, version, _)| ((*package).to_string(), (*version).to_string()))
+        .collect();
+    assert_eq!(
+        trusted.len(),
+        TRUSTED_TOOLCHAIN_NATIVE_BINDINGS.len(),
+        "a package@version is trusted twice"
+    );
+    let unlisted: Vec<_> = locked.difference(&trusted).collect();
+    let unpinned: Vec<_> = trusted.difference(&locked).collect();
+    assert!(
+        unlisted.is_empty(),
+        "pinned by a template lockfile but not trusted, so every build on that platform fails: {unlisted:?}"
+    );
+    assert!(
+        unpinned.is_empty(),
+        "trusted but pinned by no template lockfile, so the trust covers nothing in use: {unpinned:?}"
+    );
+}
+
 #[test]
 fn dependency_snapshot_accepts_trusted_toolchain_native_bindings_and_prepare_metadata() {
     let root = TempDir::new().expect("tempdir");

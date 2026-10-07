@@ -786,16 +786,6 @@ pub const FORBIDDEN_DEPENDENCY_LIFECYCLE_SCRIPTS: [&str; 4] =
 pub const TRUSTED_TOOLCHAIN_NATIVE_BINDINGS: &[(&str, &str, &str)] = &[
     (
         "@rolldown/binding-linux-arm64-musl",
-        "1.2.6",
-        "rolldown-binding.linux-arm64-musl.node",
-    ),
-    (
-        "@rolldown/binding-linux-x64-musl",
-        "1.2.6",
-        "rolldown-binding.linux-x64-musl.node",
-    ),
-    (
-        "@rolldown/binding-linux-arm64-musl",
         "1.2.9",
         "rolldown-binding.linux-arm64-musl.node",
     ),
