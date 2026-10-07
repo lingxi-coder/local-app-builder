@@ -442,7 +442,7 @@ pub struct AppMcpCatalogRef {
 /// pointers and evidence; it is never serialized into `AppRecord`. The type is
 /// the contracts' own, so the state a host is told about is the state derived
 /// here, not a copy of it.
-pub use local_app_contracts::events::PublicationState as AppPublicationState;
+pub use local_app_builder_contracts::events::PublicationState as AppPublicationState;
 
 /// Derive publication state from the active build and UI verification only.
 pub fn derive_publication_state(

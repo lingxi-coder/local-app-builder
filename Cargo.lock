@@ -614,14 +614,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
-name = "local-app-cli"
+name = "local-app-builder-cli"
 version = "0.12.0"
 dependencies = [
  "async-trait",
  "flate2",
- "local-app-contracts",
- "local-app-host",
- "local-app-service",
+ "local-app-builder-contracts",
+ "local-app-builder-host",
+ "local-app-builder-service",
  "local-apps",
  "mcp-wire",
  "serde_json",
@@ -632,7 +632,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "local-app-contracts"
+name = "local-app-builder-contracts"
 version = "0.12.0"
 dependencies = [
  "serde",
@@ -640,13 +640,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "local-app-host"
+name = "local-app-builder-host"
 version = "0.12.0"
 dependencies = [
  "async-trait",
  "flate2",
- "local-app-contracts",
- "local-app-service",
+ "local-app-builder-contracts",
+ "local-app-builder-service",
  "reqwest",
  "serde",
  "serde_json",
@@ -657,11 +657,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "local-app-plugin"
+name = "local-app-builder-plugin"
 version = "0.12.0"
 
 [[package]]
-name = "local-app-service"
+name = "local-app-builder-service"
 version = "0.12.0"
 dependencies = [
  "async-trait",
@@ -669,8 +669,8 @@ dependencies = [
  "device-api",
  "futures-core",
  "futures-util",
- "local-app-contracts",
- "local-app-plugin",
+ "local-app-builder-contracts",
+ "local-app-builder-plugin",
  "local-apps",
  "mcp-wire",
  "reqwest",
@@ -692,7 +692,7 @@ version = "0.12.0"
 dependencies = [
  "async-trait",
  "git2",
- "local-app-contracts",
+ "local-app-builder-contracts",
  "mcp-wire",
  "rand 0.9.4",
  "rooted-fs",

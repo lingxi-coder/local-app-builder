@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "local-app": {
-      "type": "stdio",
-      "command": "local-app",
-      "args": ["mcp"]
-    }
-  }
-}

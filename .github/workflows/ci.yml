@@ -39,4 +39,4 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace --no-fail-fast
       # The service without its default features: no libgit2 in the graph.
-      - run: cargo test --locked -p local-app-service --no-default-features --lib
+      - run: cargo test --locked -p local-app-builder-service --no-default-features --lib

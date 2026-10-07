@@ -5,17 +5,17 @@ Reads `cargo metadata --format-version=1 --no-deps` on stdin. Only *declared* de
 offline. The rules are the ones the crates were arranged to satisfy before they left the engine's repository; they are
 the reason this repository can be built, tested and released without it.
 
-  R1  shared primitives (device-api, local-app-contracts, mcp-wire, rooted-fs) depend on no workspace crate
+  R1  shared primitives (device-api, local-app-builder-contracts, mcp-wire, rooted-fs) depend on no workspace crate
   R2  local-apps (the core) depends on the workspace only through the primitives
-  R3  local-app-service depends on the workspace only through the primitives and local-apps, and takes local-apps
+  R3  local-app-builder-service depends on the workspace only through the primitives and local-apps, and takes local-apps
       with its default features off (the service's own `git-checkpoints` feature forwards the one that matters)
-  R4  local-app-plugin depends on nothing
+  R4  local-app-builder-plugin depends on nothing
   R5  libgit2 is reached through a feature of local-apps only: the graph that links it chooses where it comes from
   R6  the project's graph is self-contained: no dependency may come from a git source or from a path outside this
       repository. A path or git dependency on the engine (or on a product crate) is exactly what this rule exists for.
-  R7  local-app-cli is a leaf: no other workspace crate depends on it. The command line sits above the service and
+  R7  local-app-builder-cli is a leaf: no other workspace crate depends on it. The command line sits above the service and
       may use any of it, but nothing may be built on top of a binary's crate.
-  R8  local-app-host (what a Mac provides the service: the isolated command executor) sits between the service and the
+  R8  local-app-builder-host (what a Mac provides the service: the isolated command executor) sits between the service and the
       command line: it reaches the workspace only through the primitives and the service, and only the command line
       depends on it. The service never learns which host it runs on.
 """
@@ -23,12 +23,12 @@ import json
 import os
 import sys
 
-PRIMITIVES = {"device-api", "local-app-contracts", "mcp-wire", "rooted-fs"}
+PRIMITIVES = {"device-api", "local-app-builder-contracts", "mcp-wire", "rooted-fs"}
 CORE = "local-apps"
-SERVICE = "local-app-service"
-PLUGIN = "local-app-plugin"
-CLI = "local-app-cli"
-HOST = "local-app-host"
+SERVICE = "local-app-builder-service"
+PLUGIN = "local-app-builder-plugin"
+CLI = "local-app-builder-cli"
+HOST = "local-app-builder-host"
 GATED = {CORE: {"git2"}}
 
 

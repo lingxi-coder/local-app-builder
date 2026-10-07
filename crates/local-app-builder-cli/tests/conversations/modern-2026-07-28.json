@@ -1,0 +1,262 @@
+{
+  "description": "A modern (2026-07-28) client: no handshake, version in every request's _meta. Written from the revision's published examples, not captured from a client; recordings of real clients come with the headless scripts.",
+  "client": {
+    "name": "SpecExample",
+    "version": "2026-07-28",
+    "protocol": "2026-07-28"
+  },
+  "steps": [
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": "discover-1",
+        "method": "server/discover",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "jsonrpc": "2.0",
+        "id": "discover-1",
+        "result": {
+          "resultType": "complete",
+          "supportedVersions": [
+            "2026-07-28",
+            "2025-11-25"
+          ],
+          "capabilities": {
+            "tools": {}
+          },
+          "_meta": {
+            "io.modelcontextprotocol/serverInfo": {
+              "name": "local-app-builder",
+              "version": "<any>"
+            }
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 2,
+        "result": {
+          "resultType": "complete",
+          "tools": "<array>",
+          "ttlMs": 300000,
+          "cacheScope": "private"
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+          "name": "LocalAppList",
+          "arguments": {},
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 3,
+        "result": {
+          "resultType": "complete",
+          "isError": false,
+          "structuredContent": {
+            "count": 0,
+            "total": 0,
+            "has_more": false,
+            "apps": []
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+          "name": "LocalAppGet",
+          "arguments": {
+            "app_id": "any-app"
+          },
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 4,
+        "result": {
+          "resultType": "complete",
+          "isError": true
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+          "name": "LocalAppInspectUi",
+          "arguments": {
+            "app_id": "any-app"
+          },
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 5,
+        "error": {
+          "code": -32602,
+          "message": "Unknown tool: LocalAppInspectUi"
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/list",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 6,
+        "result": {
+          "resultType": "complete"
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/list",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "1900-01-01",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 7,
+        "error": {
+          "code": -32022,
+          "message": "Unsupported protocol version",
+          "data": {
+            "supported": [
+              "2026-07-28",
+              "2025-11-25"
+            ],
+            "requested": "1900-01-01"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "ping",
+        "params": {
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 8,
+        "error": {
+          "code": -32601
+        }
+      }
+    },
+    {
+      "send": {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "logging/setLevel",
+        "params": {
+          "level": "debug",
+          "_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {
+              "name": "SpecExample",
+              "version": "2026-07-28"
+            },
+            "io.modelcontextprotocol/clientCapabilities": {}
+          }
+        }
+      },
+      "expect": {
+        "id": 9,
+        "error": {
+          "code": -32601
+        }
+      }
+    }
+  ]
+}

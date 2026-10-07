@@ -14,7 +14,7 @@ default = ["git-checkpoints"]
 git-checkpoints = ["dep:git2"]
 
 [dependencies]
-local-app-contracts = { path = "../local-app-contracts" }
+local-app-builder-contracts = { path = "../local-app-builder-contracts" }
 mcp-wire = { path = "../mcp-wire" }
 rooted-fs = { path = "../rooted-fs" }
 serde.workspace = true

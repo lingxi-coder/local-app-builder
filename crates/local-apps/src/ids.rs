@@ -6,17 +6,17 @@
 //! SAME on-disk format. App ids must match `^[a-z0-9][a-z0-9-]{0,53}$` and are
 //! validated before ever being used in a path.
 //!
-//! The grammar itself lives in `local-app-contracts`, which has no
+//! The grammar itself lives in `local-app-builder-contracts`, which has no
 //! dependencies, so clients can check an id without compiling the service;
 //! this module re-exports it under its old path and adds what needs the
 //! service: minting, and validators that answer with an [`AppError`].
 
 use crate::error::AppError;
-pub use local_app_contracts::ids::{
+pub use local_app_builder_contracts::ids::{
     is_valid_app_id, is_valid_authoring_handle, is_valid_qa_handle, APP_ID_MAX_LEN,
     AUTHORING_HANDLE_PATTERN, QA_HANDLE_PATTERN,
 };
-use local_app_contracts::ids::{AUTHORING_HANDLE_PREFIX, HANDLE_SUFFIX_LEN, QA_HANDLE_PREFIX};
+use local_app_builder_contracts::ids::{AUTHORING_HANDLE_PREFIX, HANDLE_SUFFIX_LEN, QA_HANDLE_PREFIX};
 
 fn random_hex(len: usize) -> String {
     use rand::Rng;

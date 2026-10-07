@@ -19,7 +19,7 @@ LOCAL_APP = REPO
 # `ConversationExport` (the scoped identity and its registry-key grammar) lives in
 # `mcp-wire` so the in-process transport can be written without the engine.
 CONVERSATION_EXPORT = LOCAL_APP / "crates" / "mcp-wire" / "src" / "export.rs"
-TRANSPORT = LOCAL_APP / "crates" / "local-app-service" / "src" / "mcp_server.rs"
+TRANSPORT = LOCAL_APP / "crates" / "local-app-builder-service" / "src" / "mcp_server.rs"
 TASKS = REPO / "docs" / "local-apps" / "harness" / "tasks-phase-7.json"
 
 

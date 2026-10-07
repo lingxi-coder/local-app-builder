@@ -23,16 +23,16 @@ class DependencyRules(unittest.TestCase):
         return subprocess.run([sys.executable, str(ENGINE)], input=json.dumps(metadata), text=True, capture_output=True)
 
     def members(self, **edges):
-        base = {n: [] for n in ("device-api", "local-app-contracts", "mcp-wire", "rooted-fs", "local-apps",
-                                "local-app-service", "local-app-plugin", "local-app-cli", "local-app-host")}
+        base = {n: [] for n in ("device-api", "local-app-builder-contracts", "mcp-wire", "rooted-fs", "local-apps",
+                                "local-app-builder-service", "local-app-builder-plugin", "local-app-builder-cli", "local-app-builder-host")}
         base.update(edges)
         return base
 
     def test_the_shape_the_crates_have_today_passes(self):
         result = self.run_gate(self.members(**{
-            "local-apps": ["local-app-contracts", "mcp-wire", "rooted-fs", {"name": "git2", "optional": True}],
-            "local-app-service": [{"name": "local-apps", "uses_default_features": False},
-                                  "device-api", "local-app-contracts", "mcp-wire", "rooted-fs"],
+            "local-apps": ["local-app-builder-contracts", "mcp-wire", "rooted-fs", {"name": "git2", "optional": True}],
+            "local-app-builder-service": [{"name": "local-apps", "uses_default_features": False},
+                                  "device-api", "local-app-builder-contracts", "mcp-wire", "rooted-fs"],
         }))
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -43,58 +43,58 @@ class DependencyRules(unittest.TestCase):
                       result.stderr)
 
     def test_the_core_cannot_depend_on_the_service_above_it(self):
-        result = self.run_gate(self.members(**{"local-apps": ["local-app-service"]}))
+        result = self.run_gate(self.members(**{"local-apps": ["local-app-builder-service"]}))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("local-apps depends on local-app-service — the core reaches the workspace only through",
+        self.assertIn("local-apps depends on local-app-builder-service — the core reaches the workspace only through",
                       result.stderr)
 
     def test_the_service_cannot_reach_the_plugin_crate(self):
-        result = self.run_gate(self.members(**{"local-app-service": ["local-app-plugin"]}))
+        result = self.run_gate(self.members(**{"local-app-builder-service": ["local-app-builder-plugin"]}))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("local-app-service depends on local-app-plugin — the service reaches the workspace only",
+        self.assertIn("local-app-builder-service depends on local-app-builder-plugin — the service reaches the workspace only",
                       result.stderr)
 
     def test_the_service_cannot_take_the_core_with_its_default_features(self):
         result = self.run_gate(self.members(**{
-            "local-app-service": [{"name": "local-apps", "uses_default_features": True}]}))
+            "local-app-builder-service": [{"name": "local-apps", "uses_default_features": True}]}))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("local-app-service depends on local-apps with its default features", result.stderr)
+        self.assertIn("local-app-builder-service depends on local-apps with its default features", result.stderr)
 
     def test_the_plugin_crate_has_no_dependencies(self):
-        result = self.run_gate(self.members(**{"local-app-plugin": ["serde"]}))
+        result = self.run_gate(self.members(**{"local-app-builder-plugin": ["serde"]}))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("local-app-plugin must have no dependencies", result.stderr)
+        self.assertIn("local-app-builder-plugin must have no dependencies", result.stderr)
 
     def test_nothing_may_depend_on_the_command_line(self):
-        result = self.run_gate(self.members(**{"local-app-service": ["local-app-cli"]}))
+        result = self.run_gate(self.members(**{"local-app-builder-service": ["local-app-builder-cli"]}))
         self.assertEqual(result.returncode, 1)
-        self.assertIn("local-app-service depends on local-app-cli — the command line is a leaf", result.stderr)
+        self.assertIn("local-app-builder-service depends on local-app-builder-cli — the command line is a leaf", result.stderr)
 
     def test_the_command_line_may_use_the_service_and_the_core(self):
         result = self.run_gate(self.members(**{
-            "local-app-cli": [{"name": "local-app-service"}, {"name": "local-apps", "uses_default_features": False}],
+            "local-app-builder-cli": [{"name": "local-app-builder-service"}, {"name": "local-apps", "uses_default_features": False}],
         }))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_host_may_use_the_service_and_the_primitives_and_the_command_line_may_use_the_host(self):
         result = self.run_gate(self.members(**{
-            "local-app-host": ["local-app-service", "local-app-contracts"],
-            "local-app-cli": [{"name": "local-app-host"}, {"name": "local-app-service"}],
+            "local-app-builder-host": ["local-app-builder-service", "local-app-builder-contracts"],
+            "local-app-builder-cli": [{"name": "local-app-builder-host"}, {"name": "local-app-builder-service"}],
         }))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_host_cannot_reach_the_core_or_the_command_line(self):
-        for bad in ("local-apps", "local-app-cli", "local-app-plugin"):
-            result = self.run_gate(self.members(**{"local-app-host": [bad]}))
+        for bad in ("local-apps", "local-app-builder-cli", "local-app-builder-plugin"):
+            result = self.run_gate(self.members(**{"local-app-builder-host": [bad]}))
             self.assertEqual(result.returncode, 1, bad)
-            self.assertIn("local-app-host depends on %s — the host reaches the workspace only through" % bad,
+            self.assertIn("local-app-builder-host depends on %s — the host reaches the workspace only through" % bad,
                           result.stderr)
 
     def test_nothing_but_the_command_line_may_depend_on_the_host(self):
-        for crate in ("local-app-service", "local-apps", "mcp-wire"):
-            result = self.run_gate(self.members(**{crate: ["local-app-host"]}))
+        for crate in ("local-app-builder-service", "local-apps", "mcp-wire"):
+            result = self.run_gate(self.members(**{crate: ["local-app-builder-host"]}))
             self.assertEqual(result.returncode, 1, crate)
-            self.assertIn("%s depends on local-app-host — only the command line is built on the host" % crate,
+            self.assertIn("%s depends on local-app-builder-host — only the command line is built on the host" % crate,
                           result.stderr)
 
     def test_libgit2_stays_behind_its_feature(self):

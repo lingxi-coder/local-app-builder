@@ -1,0 +1,9 @@
+{
+  "name": "local-app-builder",
+  "displayName": "Local App Builder",
+  "version": "0.1.0",
+  "description": "Create, build, preview and inspect Local Apps on this machine from Claude Code.",
+  "author": { "name": "Local App Builder" },
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["local-app-builder", "mcp"]
+}

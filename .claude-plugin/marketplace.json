@@ -1,13 +1,13 @@
 {
-  "name": "local-app",
+  "name": "local-app-builder",
   "description": "Local App plugins for Claude Code and Codex.",
   "owner": {
     "name": "Local App"
   },
   "plugins": [
     {
-      "name": "local-app",
-      "source": "./plugins/local-app",
+      "name": "local-app-builder",
+      "source": "./plugins/local-app-builder",
       "description": "Read the Local Apps on this machine: list them and read an app's record, logs, checkpoints and background tasks."
     }
   ]

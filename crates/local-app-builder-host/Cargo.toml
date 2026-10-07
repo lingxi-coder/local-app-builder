@@ -1,0 +1,29 @@
+[package]
+name = "local-app-builder-host"
+version = "0.12.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "What a Mac provides the Local App service: the isolated command executor that builds an app without a guest."
+
+# Sits above the service (it implements the service's `BuildExecutor`) and below the command line and any desktop
+# shell that wants the same executor (check_deps.py R8).
+[dependencies]
+async-trait.workspace = true
+local-app-builder-contracts = { path = "../local-app-builder-contracts" }
+local-app-builder-service = { path = "../local-app-builder-service" }
+flate2 = "1"
+# The same client the service uses (one version of it in the graph): rustls, no native TLS.
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "time"] }
+
+[dev-dependencies]
+tempfile = "3.13"
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "time"] }
+
+[lints]
+workspace = true

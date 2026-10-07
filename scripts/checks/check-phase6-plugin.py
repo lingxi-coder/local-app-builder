@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 ROOT = REPO
 CORE = ROOT / "crates" / "local-apps" / "src"
 # The id grammar has its own dependency-free crate; `local-apps` re-exports it.
-CONTRACTS = ROOT / "crates" / "local-app-contracts" / "src"
+CONTRACTS = ROOT / "crates" / "local-app-builder-contracts" / "src"
 WORKFLOW = ROOT / "crates" / "plugins" / "lingxi-local-app" / "workflows" / "local-app-mcp-authoring.js"
 
 
