@@ -10,6 +10,7 @@ mod mcp_backend;
 mod mcp_protocol;
 mod mcp_stdio;
 mod open_lock;
+mod writer_lock;
 
 pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
 pub use doctor::{run_doctor, Check, CheckStatus, Report};
@@ -20,6 +21,7 @@ pub use mcp_protocol::{
 };
 pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
 pub use open_lock::{OpenLock, OPEN_LOCK_FILE, OPEN_LOCK_TIMEOUT};
+pub use writer_lock::{Attempt as WriterAttempt, Holder as WriterHolder, WriterLock, WRITER_LOCK_FILE};
 
 use std::collections::HashMap;
 use std::io::Write;
