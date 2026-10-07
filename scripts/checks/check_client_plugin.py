@@ -11,9 +11,9 @@ drifting apart except this gate.
   C3  both marketplace files list the plugin under the same name, from a `./plugins/local-app` that exists
   C4  every skill is `skills/<dir>/SKILL.md` with frontmatter `name` equal to the directory and a description
   C5  no skill uses a `${...}` placeholder (Codex substitutes none, Claude only its own) or names the engine's product
-      (`window.lingxi` is the app bridge's real name and is allowed)
-  C6  every `LocalApp…` tool a skill names is one the server offers today (the CLI's SERVED operations, through the
-      service's tool table), and every offered tool is named in the `local-app` skill, so the model is told about it
+      (`window.lingxi` and `LINGXI.md` are real names and are allowed)
+  C6  every `LocalApp…` tool a skill names is one the server offers today (the CLI's SERVED_READ and SERVED_WRITE
+      operations, through the service's tool table), and every offered tool is named in the `local-app` skill, so the model is told about it
 """
 import json
 import os
@@ -51,7 +51,8 @@ def frontmatter(text):
 
 
 def served_tool_names(root, problems):
-    """Tool names the CLI offers: SERVED operations looked up in the service's (name, operation, read_only) table."""
+    """Tool names the CLI offers: SERVED_READ operations that are read-only in the service's (name, operation,
+    read_only) table, plus every SERVED_WRITE operation."""
     try:
         with open(os.path.join(root, "crates/local-app-cli/src/mcp_backend.rs"), encoding="utf-8") as f:
             backend = f.read()
@@ -60,17 +61,24 @@ def served_tool_names(root, problems):
     except FileNotFoundError as e:
         problems.append("cannot read the tool sources: %s" % e)
         return None, None
-    served = re.search(r"pub const SERVED: &\[&str\] = &\[(.*?)\];", backend, re.S)
-    if not served:
-        problems.append("crates/local-app-cli/src/mcp_backend.rs has no `SERVED` list")
-        return None, None
-    operations = set(re.findall(r'"([a-z_]+)"', served.group(1)))
+    lists = {}
+    for kind in ("SERVED_READ", "SERVED_WRITE"):
+        found = re.search(r"pub const %s: &\[&str\] = &\[(.*?)\];" % kind, backend, re.S)
+        if not found:
+            problems.append("crates/local-app-cli/src/mcp_backend.rs has no `%s` list" % kind)
+            return None, None
+        lists[kind] = set(re.findall(r'"([a-z_]+)"', found.group(1)))
     rows = re.findall(r'\(\s*"(LocalApp[A-Za-z]+)"\s*,\s*"([a-z_]+)"\s*,\s*(true|false)\s*,?\s*\)', table)
     every = {name for name, _, _ in rows}
-    offered = {name for name, op, read_only in rows if op in operations and read_only == "true"}
-    if len(offered) != len(operations):
-        problems.append("SERVED names operations with no read-only tool row: %s"
-                        % ", ".join(sorted(operations - {op for _, op, ro in rows if ro == "true"})))
+    offered = {name for name, op, read_only in rows
+               if op in lists["SERVED_WRITE"] or (op in lists["SERVED_READ"] and read_only == "true")}
+    known_ops = {op for _, op, _ in rows}
+    missing = (lists["SERVED_READ"] | lists["SERVED_WRITE"]) - known_ops
+    if missing:
+        problems.append("SERVED names operations with no tool row: %s" % ", ".join(sorted(missing)))
+    unreadable = {op for _, op, ro in rows if op in lists["SERVED_READ"] and ro != "true"}
+    if unreadable:
+        problems.append("SERVED_READ names operations that are not read-only: %s" % ", ".join(sorted(unreadable)))
     return offered, every
 
 
@@ -154,8 +162,9 @@ def check(root):
                 problems.append("%s: frontmatter description is empty" % rel)
         if "${" in text:
             problems.append("%s uses a ${...} placeholder; neither client expands the same ones" % rel)
-        # `window.lingxi` is the app bridge's real name and stays; any other mention is the engine's product.
-        stripped = text.replace("window.lingxi", "")
+        # `window.lingxi` (the app bridge) and `LINGXI.md` (the file the service writes into every workspace) are real
+        # names and stay; any other mention is the engine's product.
+        stripped = text.replace("window.lingxi", "").replace("LINGXI.md", "")
         if re.search(r"lingxi", stripped, re.I):
             problems.append("%s names the engine's product (`%s`)" % (rel, re.search(r"\S*lingxi\S*", stripped, re.I).group(0)))
         mentioned = set(re.findall(r"\bLocalApp[A-Z][A-Za-z]*\b", text))

@@ -90,8 +90,8 @@ class ClientPlugin(unittest.TestCase):
         self.rejects("`LocalAppFrobnicate`, which is not a tool of the service")
 
     def test_a_tool_the_server_does_not_offer_yet_is_rejected(self):
-        self.edit("plugins/local-app/skills/local-app/SKILL.md", lambda t: t + "\nThen run `LocalAppBuild`.\n")
-        self.rejects("`LocalAppBuild`, which exists but is not offered")
+        self.edit("plugins/local-app/skills/local-app/SKILL.md", lambda t: t + "\nThen run `LocalAppRuntime`.\n")
+        self.rejects("`LocalAppRuntime`, which exists but is not offered")
 
     def test_an_offered_tool_the_skill_does_not_mention_is_rejected(self):
         self.edit("plugins/local-app/skills/local-app/SKILL.md", lambda t: t.replace("LocalAppCheckpointList", "the checkpoint tool"))
@@ -101,15 +101,19 @@ class ClientPlugin(unittest.TestCase):
         self.edit("plugins/local-app/skills/local-app-setup/SKILL.md", lambda t: t + "\nSee ${CLAUDE_PLUGIN_ROOT}/x.\n")
         self.rejects("uses a ${...} placeholder")
 
-    def test_the_engines_product_name_is_rejected_but_the_bridge_name_is_not(self):
-        self.edit("plugins/local-app/skills/local-app-setup/SKILL.md", lambda t: t + "\nThe app talks to window.lingxi.v2.\n")
-        self.assertEqual(self.gate().returncode, 0, "window.lingxi is the bridge's real name")
-        self.edit("plugins/local-app/skills/local-app-setup/SKILL.md", lambda t: t + "\nRead LINGXI.md first.\n")
+    def test_the_engines_product_name_is_rejected_but_the_real_names_are_not(self):
+        self.edit("plugins/local-app/skills/local-app-setup/SKILL.md", lambda t: t + "\nThe app talks to window.lingxi.v2.\nRead LINGXI.md first.\n")
+        self.assertEqual(self.gate().returncode, 0, "window.lingxi and LINGXI.md are real names")
+        self.edit("plugins/local-app/skills/local-app-setup/SKILL.md", lambda t: t + "\nAsk the LingXi app to do it.\n")
         self.rejects("names the engine's product")
 
     def test_a_server_list_with_an_operation_that_has_no_tool_row_is_rejected(self):
-        self.edit("crates/local-app-cli/src/mcp_backend.rs", lambda t: t.replace('    "background_status",\n];', '    "background_status",\n    "no_such_operation",\n];', 1))
-        self.rejects("SERVED names operations with no read-only tool row")
+        self.edit("crates/local-app-cli/src/mcp_backend.rs", lambda t: t.replace('    "background_status",', '    "background_status",\n    "no_such_operation",', 1))
+        self.rejects("SERVED names operations with no tool row")
+
+    def test_a_read_list_naming_a_writing_operation_is_rejected(self):
+        self.edit("crates/local-app-cli/src/mcp_backend.rs", lambda t: t.replace('    "background_status",', '    "background_status",\n    "build",', 1))
+        self.rejects("SERVED_READ names operations that are not read-only: build")
 
 
 if __name__ == "__main__":
