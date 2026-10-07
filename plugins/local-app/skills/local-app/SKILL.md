@@ -3,7 +3,7 @@ name: local-app
 description: Use when the user asks about their Local Apps (small apps kept in a local data root): to find one, read its state, logs or checkpoints, or create and build one. Lists which Local App tools exist and what they cannot do yet.
 ---
 
-# Local App
+# Local App Builder
 
 A Local App is a small app that lives in a data root on this machine. The `local-app` MCP server works on that data
 root. Its tools are named `LocalApp…`; your client may show them with a prefix for the plugin and the server. The
