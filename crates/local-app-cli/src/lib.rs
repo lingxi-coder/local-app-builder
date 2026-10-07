@@ -10,16 +10,18 @@ mod mcp_backend;
 mod mcp_protocol;
 mod mcp_stdio;
 mod open_lock;
+mod toolchain_command;
 mod writer_lock;
 
 pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
-pub use doctor::{run_doctor, Check, CheckStatus, Report};
+pub use doctor::{run_doctor, run_doctor_with, Check, CheckStatus, Report};
 pub use mcp_backend::{LocalAppBackend, UnsupportedHost, UNSUPPORTED};
 pub use mcp_protocol::{
     CallError, Reply, ServerIdentity, Session, ToolBackend, ToolResult, ToolSpec, LEGACY_VERSION, MODERN_VERSION,
     SUPPORTED_VERSIONS,
 };
 pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
+pub use toolchain_command::run_toolchain;
 pub use open_lock::{OpenLock, OPEN_LOCK_FILE, OPEN_LOCK_TIMEOUT};
 pub use writer_lock::{Attempt as WriterAttempt, Holder as WriterHolder, WriterLock, WRITER_LOCK_FILE};
 
@@ -77,11 +79,16 @@ USAGE:
 COMMANDS:
     mcp        Serve the Local App tools to an MCP client over stdio
     doctor     Check this machine and the data root
+    toolchain  Install or check the Node and pnpm that builds run with
     version    Print the version
     help       Print this message
 
-OPTIONS (mcp, doctor):
+OPTIONS (mcp, doctor, toolchain):
     --data-root <DIR>   Use this data root instead of the default
+
+USAGE (toolchain):
+    local-app toolchain status
+    local-app toolchain install [--from <DIR>]   (--from: take the pinned archives from a directory, no network)
 
 OPTIONS (doctor):
     --json              Print the report as JSON
@@ -108,6 +115,7 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
         }
         "doctor" => doctor_command(rest, env, out, err),
         "mcp" => mcp_command(rest, env, err),
+        "toolchain" => run_toolchain(rest, env, local_app_host::Platform::host().map(local_app_host::Spec::pinned), out, err),
         other => {
             let _ = writeln!(err, "local-app: unknown command `{other}`\n");
             let _ = err.write_all(USAGE.as_bytes());

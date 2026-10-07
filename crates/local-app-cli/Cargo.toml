@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait.workspace = true
+local-app-host = { path = "../local-app-host" }
 local-app-service = { path = "../local-app-service" }
 local-apps = { path = "../local-apps", default-features = false }
 mcp-wire = { path = "../mcp-wire" }
@@ -24,6 +25,9 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util"] }
 
 [dev-dependencies]
+flate2 = "1"
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
 tempfile = "3.13"
 tokio = { workspace = true, features = ["io-std", "io-util", "test-util"] }
 

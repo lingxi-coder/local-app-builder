@@ -1,11 +1,13 @@
 //! `local-app doctor`: what this machine and the data root look like, before anything is built.
 //!
-//! A check fails only when something would stop every later command (the data root cannot be written). A missing
-//! tool is a warning: the commands that need it say so when they run.
+//! A check fails only when something would stop every later command (the data root cannot be written). A toolchain
+//! that is not installed is a warning: the commands that need it say so when they run. Node and pnpm on `PATH` are not
+//! looked at, because a build never uses them (see `local_app_host::Toolchains`).
 
 use crate::{DataRoot, Env};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use local_app_host::{Platform, Spec, Status, Toolchains};
+use std::path::Path;
 
 /// How one check came out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +33,7 @@ impl CheckStatus {
 /// One line of the report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
-    /// A stable identifier (`data-root`, `tool.node`, …).
+    /// A stable identifier (`data-root`, `toolchain`, …).
     pub id: &'static str,
     /// The outcome.
     pub status: CheckStatus,
@@ -104,10 +106,16 @@ fn json_string(value: &str) -> String {
     s
 }
 
-/// Run every check against `root` and `env`.
+/// Run every check against `root`. `_env` is kept for the checks that will read the environment.
 #[must_use]
 pub fn run_doctor(root: &DataRoot, env: &Env) -> Report {
-    let mut checks = vec![
+    run_doctor_with(root, env, Platform::host().map(Spec::pinned))
+}
+
+/// [`run_doctor`] with the toolchain to look for given (or why there is none for this machine).
+#[must_use]
+pub fn run_doctor_with(root: &DataRoot, _env: &Env, spec: Result<Spec, String>) -> Report {
+    let checks = vec![
         Check {
             id: "version",
             status: CheckStatus::Ok,
@@ -119,11 +127,34 @@ pub fn run_doctor(root: &DataRoot, env: &Env) -> Report {
             detail: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         },
         check_data_root(root),
+        check_toolchain(root, spec),
     ];
-    for tool in ["node", "pnpm"] {
-        checks.push(check_tool(tool, env));
-    }
     Report { checks }
+}
+
+fn check_toolchain(root: &DataRoot, spec: Result<Spec, String>) -> Check {
+    let id = "toolchain";
+    let spec = match spec {
+        Ok(spec) => spec,
+        Err(reason) => return Check { id, status: CheckStatus::Warn, detail: reason },
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(error) => return Check { id, status: CheckStatus::Warn, detail: format!("cannot check: {error}") },
+    };
+    let toolchains = Toolchains::in_data_root(&root.path);
+    let (status, detail) = match runtime.block_on(toolchains.status(&spec)) {
+        Status::Ready(receipt) => (
+            CheckStatus::Ok,
+            format!("{} is installed and verified (node {}, pnpm {})", spec.key, receipt.node.version, receipt.pnpm.version),
+        ),
+        Status::NotInstalled => (
+            CheckStatus::Warn,
+            format!("{} is not installed; `local-app toolchain install` provides it, and builds need it", spec.key),
+        ),
+        Status::Damaged(why) => (CheckStatus::Warn, format!("{} is damaged ({why}); `local-app toolchain install` replaces it", spec.key)),
+    };
+    Check { id, status, detail }
 }
 
 fn check_data_root(root: &DataRoot) -> Check {
@@ -148,32 +179,6 @@ fn probe_writable(dir: &Path) -> std::io::Result<()> {
     let probe = dir.join(format!(".doctor-probe-{}", std::process::id()));
     std::fs::write(&probe, b"")?;
     std::fs::remove_file(&probe)
-}
-
-fn check_tool(name: &'static str, env: &Env) -> Check {
-    let id = match name {
-        "node" => "tool.node",
-        _ => "tool.pnpm",
-    };
-    match find_on_path(name, env.path()) {
-        Some(path) => Check { id, status: CheckStatus::Ok, detail: format!("{name} found at {}", path.display()) },
-        None => Check { id, status: CheckStatus::Warn, detail: format!("{name} was not found on PATH") },
-    }
-}
-
-fn find_on_path(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    dirs.iter().map(|d| d.join(name)).find(|p| is_executable(p))
-}
-
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
 }
 
 #[cfg(test)]
@@ -234,23 +239,38 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
-    fn a_tool_is_found_only_when_it_is_an_executable_file() {
+    fn a_missing_toolchain_is_a_warning_that_says_how_to_get_it_and_creates_nothing() {
+        let data = tempfile::tempdir().unwrap();
+        let r = run_doctor_with(&root(data.path()), &Env::default(), Ok(Spec::pinned(Platform::DarwinArm64)));
+        let check = find(&r, "toolchain");
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.detail.contains("pnpm@12.5.1/node@26.9.0") && check.detail.contains("local-app toolchain install"), "{}", check.detail);
+        assert!(!r.has_failure());
+        assert_eq!(std::fs::read_dir(data.path()).unwrap().count(), 0, "doctor must not create anything");
+    }
+
+    #[test]
+    fn node_and_pnpm_on_path_are_not_a_toolchain() {
         use std::os::unix::fs::PermissionsExt;
         let bin = tempfile::tempdir().unwrap();
-        let node = bin.path().join("node");
-        std::fs::write(&node, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let pnpm = bin.path().join("pnpm");
-        std::fs::write(&pnpm, "not executable").unwrap();
-        std::fs::set_permissions(&pnpm, std::fs::Permissions::from_mode(0o644)).unwrap();
+        for tool in ["node", "pnpm"] {
+            std::fs::write(bin.path().join(tool), "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(bin.path().join(tool), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let env = Env::new([], vec![bin.path().to_path_buf()]);
         let data = tempfile::tempdir().unwrap();
-        let r = run_doctor(&root(data.path()), &env);
-        assert_eq!(find(&r, "tool.node").status, CheckStatus::Ok);
-        assert_eq!(find(&r, "tool.pnpm").status, CheckStatus::Warn);
-        assert!(!r.has_failure(), "a missing tool is a warning, not a failure");
+        let r = run_doctor_with(&root(data.path()), &env, Ok(Spec::pinned(Platform::DarwinArm64)));
+        assert_eq!(find(&r, "toolchain").status, CheckStatus::Warn);
+        assert!(r.checks.iter().all(|c| !c.id.starts_with("tool.")));
+    }
+
+    #[test]
+    fn a_machine_without_pins_says_so_in_the_toolchain_check() {
+        let data = tempfile::tempdir().unwrap();
+        let r = run_doctor_with(&root(data.path()), &Env::default(), Err("no pinned toolchain for linux-x86_64".into()));
+        assert_eq!(find(&r, "toolchain").status, CheckStatus::Warn);
+        assert!(find(&r, "toolchain").detail.contains("no pinned toolchain"));
     }
 
     #[test]

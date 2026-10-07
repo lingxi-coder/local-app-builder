@@ -12,10 +12,18 @@ description = "What a Mac provides the Local App service: the isolated command e
 async-trait.workspace = true
 local-app-contracts = { path = "../local-app-contracts" }
 local-app-service = { path = "../local-app-service" }
-tokio = { workspace = true, features = ["io-util", "process", "time"] }
+flate2 = "1"
+# The same client the service uses (one version of it in the graph): rustls, no native TLS.
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tar = { version = "0.4", default-features = false }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "time"] }
 
 [dev-dependencies]
 tempfile = "3.13"
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "time"] }
 
 [lints]
 workspace = true
