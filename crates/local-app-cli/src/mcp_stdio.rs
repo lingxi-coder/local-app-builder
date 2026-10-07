@@ -5,16 +5,21 @@
 //! notification) are the exception: they are handled in the order they arrive, so nothing is served ahead of them. The writer is a single task, so two responses never
 //! interleave on one line. Nothing but protocol messages is ever written to the output; diagnostics go to the error
 //! stream, which the specification leaves to the server.
+//!
+//! The server can also put a request to the client (a legacy session's `elicitation/create`): [`Links`] writes it
+//! through the same writer, matches the client's answer by id as it comes off the input, tells the client when the wait
+//! is abandoned, and fails every wait still open when the input closes.
 
-use crate::mcp_protocol::{parse_error, too_large, Reply, Session, ToolBackend};
+use crate::mcp_protocol::{parse_error, too_large, ClientLink, LinkError, Reply, Session, ToolBackend};
+use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinSet};
 
 /// A message larger than this is refused. A tool input is at most 256 KiB; the rest is headroom for encoding.
@@ -40,6 +45,87 @@ type InFlight = Mutex<HashMap<String, Running>>;
 
 /// What a task hands the writer: the response, and (for a request) the key and flag it was registered under.
 type Outgoing = (Option<(String, Arc<AtomicBool>)>, Value);
+
+/// Requests this server has put to the client and not yet seen answered.
+struct Links {
+    next: AtomicU64,
+    pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, LinkError>>>>,
+    /// `None` once the input has closed: the session outlives the stream, and holding a sender past that point would
+    /// keep the writer from ever finishing.
+    out: Mutex<Option<mpsc::UnboundedSender<Outgoing>>>,
+}
+
+impl Links {
+    fn new(out: mpsc::UnboundedSender<Outgoing>) -> Self {
+        Self { next: AtomicU64::new(1), pending: Mutex::new(HashMap::new()), out: Mutex::new(Some(out)) }
+    }
+
+    /// Hand an answer from the client to whoever is waiting for it. Anything else is ignored: an answer to a request
+    /// that was given up on, or one this server never sent.
+    fn deliver(&self, message: &Value) {
+        let Some(id) = message.get("id").and_then(Value::as_str) else { return };
+        let Some(waiter) = self.pending.lock().expect("pending requests").remove(id) else { return };
+        let outcome = match message.get("error") {
+            Some(error) => Err(LinkError::Rejected(
+                error.get("message").and_then(Value::as_str).unwrap_or("the client returned an error").to_string(),
+            )),
+            None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
+        };
+        let _ = waiter.send(outcome);
+    }
+
+    fn send(&self, message: Value) -> bool {
+        self.out.lock().expect("output").as_ref().is_some_and(|out| out.send((None, message)).is_ok())
+    }
+
+    /// The input closed: nobody will answer.
+    fn close(&self) {
+        self.out.lock().expect("output").take();
+        for (_, waiter) in self.pending.lock().expect("pending requests").drain() {
+            let _ = waiter.send(Err(LinkError::Closed));
+        }
+    }
+}
+
+/// Withdraws a request from the table when its wait ends any way but an answer, and tells the client so.
+struct Abandon<'a> {
+    links: &'a Links,
+    id: String,
+    answered: bool,
+}
+
+impl Drop for Abandon<'_> {
+    fn drop(&mut self) {
+        if self.links.pending.lock().expect("pending requests").remove(&self.id).is_some() && !self.answered {
+            self.links.send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": self.id, "reason": "the server stopped waiting"},
+            }));
+        }
+    }
+}
+
+#[async_trait]
+impl ClientLink for Links {
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, LinkError> {
+        let id = format!("srv-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().expect("pending requests").insert(id.clone(), sender);
+        let mut abandon = Abandon { links: self, id: id.clone(), answered: false };
+        if !self.send(serde_json::json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})) {
+            return Err(LinkError::Closed);
+        }
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(outcome)) => {
+                abandon.answered = true;
+                outcome
+            }
+            Ok(Err(_)) => Err(LinkError::Closed),
+            Err(_) => Err(LinkError::TimedOut),
+        }
+    }
+}
 
 /// Serve one client until it closes its end of the stream.
 ///
@@ -74,6 +160,9 @@ where
         }
     });
 
+    let links = Arc::new(Links::new(out.clone()));
+    session.attach_link(links.clone());
+
     let mut tasks: JoinSet<()> = JoinSet::new();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
@@ -96,6 +185,11 @@ where
         };
         if message.get("method").and_then(Value::as_str) == Some("notifications/cancelled") {
             cancel(&in_flight, &message);
+            continue;
+        }
+        // An answer to a request this server put to the client: it has an id and a result or an error, and no method.
+        if message.get("method").is_none() && message.get("id").is_some() && (message.get("result").is_some() || message.get("error").is_some()) {
+            links.deliver(&message);
             continue;
         }
         // What changes the session is handled here, in arrival order, before the next line is read: a legacy client
@@ -123,7 +217,9 @@ where
         }
     }
 
-    // The client closed its end. Let what it already asked for finish, within the grace period.
+    // The client closed its end: nobody will answer what is still waiting on it, and what it already asked for may
+    // finish within the grace period.
+    links.close();
     let drained = tokio::time::timeout(DRAIN_GRACE, async {
         while tasks.join_next().await.is_some() {}
     })
@@ -149,7 +245,7 @@ fn cancel(in_flight: &InFlight, message: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp_protocol::{CallError, ServerIdentity, ToolResult, ToolSpec};
+    use crate::mcp_protocol::{Approval, ApprovalRequest, CallContext, CallError, ServerIdentity, ToolResult, ToolSpec};
     use async_trait::async_trait;
     use serde_json::json;
     use tokio::io::{duplex, split, AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
@@ -162,8 +258,21 @@ mod tests {
             Vec::new()
         }
 
-        async fn call(&self, name: &str, _arguments: Value) -> Result<ToolResult, CallError> {
+        async fn call(&self, name: &str, _arguments: Value, context: &CallContext) -> Result<ToolResult, CallError> {
             match name {
+                // Asks the person and reports the answer, so a test can see what the protocol layer made of it.
+                "ask" => {
+                    let answer = context
+                        .approver
+                        .ask(ApprovalRequest { message: "Create the app `Errands`?".into(), question: "Approve".into() })
+                        .await;
+                    let text = match answer {
+                        Approval::Approved => "approved".to_string(),
+                        Approval::Declined => "declined".to_string(),
+                        Approval::Unavailable(why) => format!("unavailable: {why}"),
+                    };
+                    Ok(ToolResult { content: vec![json!({"type": "text", "text": text})], ..ToolResult::default() })
+                }
                 // Never finishes on its own: only a cancellation or the drain limit ends it.
                 "hang" => std::future::pending().await,
                 "brief" => {
@@ -213,6 +322,14 @@ mod tests {
                 .unwrap();
             assert!(read > 0, "the server closed its output");
             serde_json::from_str(&line).unwrap_or_else(|_| panic!("stdout carried a non-message line: {line:?}"))
+        }
+
+        /// The next message, with no time limit of its own: for tests where time is paused and a limit measured in
+        /// the clock the test controls would fire before the thing being waited for.
+        async fn next_when_time_is_paused(&mut self) -> Value {
+            let mut line = String::new();
+            assert!(self.output.read_line(&mut line).await.unwrap() > 0, "the server closed its output");
+            serde_json::from_str(&line).unwrap_or_else(|_| panic!("non-message line {line:?}"))
         }
 
         /// Close the client's end and return everything left on the server's output.
@@ -338,5 +455,195 @@ mod tests {
         client.send(&call("3", "brief")).await;
         assert_eq!(client.next().await["id"], 3);
         assert!(client.finish().await.is_empty());
+    }
+
+    // ----- asking the person ----------------------------------------------------------------------------------
+
+    const LEGACY_INIT: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":CAPS,"clientInfo":{"name":"t","version":"0"}}}"#;
+
+    /// A legacy session opened with the given client capabilities.
+    async fn legacy_client(capabilities: &str) -> Client {
+        let mut client = connect();
+        client.send(&LEGACY_INIT.replace("CAPS", capabilities)).await;
+        client.send(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
+        assert_eq!(client.next().await["id"], 1);
+        client
+    }
+
+    fn ask_call(id: u32) -> String {
+        format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"ask","arguments":{{}}}}}}"#)
+    }
+
+    fn answer(id: &str, result: &str) -> String {
+        format!(r#"{{"jsonrpc":"2.0","id":"{id}","result":{result}}}"#)
+    }
+
+    fn text(reply: &Value) -> String {
+        reply["result"]["content"][0]["text"].as_str().unwrap_or_else(|| panic!("no text in {reply}")).to_string()
+    }
+
+    #[tokio::test]
+    async fn a_yes_from_the_person_is_an_approval_and_the_question_is_the_one_the_server_chose() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        let question = client.next().await;
+        assert_eq!(question["method"], "elicitation/create");
+        assert_eq!(question["params"]["message"], "Create the app `Errands`?");
+        let schema = &question["params"]["requestedSchema"];
+        assert_eq!(schema["properties"]["approve"]["type"], "boolean");
+        assert_eq!(schema["properties"]["approve"]["default"], false, "the form must not come pre-approved");
+        assert_eq!(schema["required"][0], "approve");
+        let id = question["id"].as_str().unwrap().to_string();
+        client.send(&answer(&id, r#"{"action":"accept","content":{"approve":true}}"#)).await;
+        let reply = client.next().await;
+        assert_eq!((reply["id"].clone(), text(&reply)), (json!(2), "approved".to_string()));
+        assert!(client.finish().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn anything_that_is_not_a_clear_yes_is_a_no() {
+        for (label, result) in [
+            ("unticked", r#"{"action":"accept","content":{"approve":false}}"#),
+            ("decline", r#"{"action":"decline"}"#),
+            ("cancel", r#"{"action":"cancel"}"#),
+            ("accept with no content", r#"{"action":"accept"}"#),
+            ("a string that says yes", r#"{"action":"accept","content":{"approve":"true"}}"#),
+            ("the number one", r#"{"action":"accept","content":{"approve":1}}"#),
+            ("content without the field", r#"{"action":"accept","content":{"other":true}}"#),
+            ("an unknown action", r#"{"action":"approve","content":{"approve":true}}"#),
+            ("not an object", r#""yes""#),
+            ("null", "null"),
+        ] {
+            let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+            client.send(&ask_call(2)).await;
+            let id = client.next().await["id"].as_str().unwrap().to_string();
+            client.send(&answer(&id, result)).await;
+            assert_eq!(text(&client.next().await), "declined", "{label}");
+            client.finish().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_client_that_answers_with_an_error_means_the_person_could_not_be_asked() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        let id = client.next().await["id"].as_str().unwrap().to_string();
+        client.send(&format!(r#"{{"jsonrpc":"2.0","id":"{id}","error":{{"code":-32601,"message":"Method not found"}}}}"#)).await;
+        let reply = text(&client.next().await);
+        assert!(reply.starts_with("unavailable: the client refused the question: Method not found"), "{reply}");
+        client.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_client_that_declared_no_elicitation_is_never_sent_a_question() {
+        for capabilities in ["{}", r#"{"roots":{}}"#, r#"{"elicitation":{"url":{}}}"#, r#"{"elicitation":null}"#, r#"{"elicitation":true}"#] {
+            let mut client = legacy_client(capabilities).await;
+            client.send(&ask_call(2)).await;
+            // The first and only message is the tool's result: nothing was asked.
+            let reply = client.next().await;
+            assert_eq!(reply["id"], 2, "{capabilities}: {reply}");
+            let said = text(&reply);
+            assert!(said.starts_with("unavailable: the client did not declare support for elicitation"), "{capabilities}: {said}");
+            assert!(said.contains("Nothing was done"));
+            assert!(client.finish().await.is_empty(), "{capabilities}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_form_capability_alone_is_enough() {
+        let mut client = legacy_client(r#"{"elicitation":{"form":{}}}"#).await;
+        client.send(&ask_call(2)).await;
+        assert_eq!(client.next().await["method"], "elicitation/create");
+        client.finish().await;
+    }
+
+    #[tokio::test]
+    async fn the_modern_generation_is_never_asked_mid_call_and_says_why() {
+        let mut client = connect();
+        client
+            .send(&format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"ask",{META_WITH_ELICITATION}}}}}"#
+            ))
+            .await;
+        let reply = client.next().await;
+        assert_eq!(reply["id"], 1, "no request may precede the result: {reply}");
+        assert!(text(&reply).contains("multi round-trip"), "{}", text(&reply));
+        assert!(client.finish().await.is_empty());
+    }
+
+    const META_WITH_ELICITATION: &str = r#""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{"elicitation":{"form":{}}}}"#;
+
+    #[tokio::test]
+    async fn cancelling_the_call_while_the_person_is_being_asked_withdraws_the_question() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        let question = client.next().await;
+        client.send(r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}"#).await;
+        let withdrawn = client.next().await;
+        assert_eq!(withdrawn["method"], "notifications/cancelled");
+        assert_eq!(withdrawn["params"]["requestId"], question["id"]);
+        // A late answer to the withdrawn question changes nothing and gets no reply.
+        let id = question["id"].as_str().unwrap().to_string();
+        client.send(&answer(&id, r#"{"action":"accept","content":{"approve":true}}"#)).await;
+        assert!(client.finish().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_answer_with_an_id_nobody_is_waiting_for_is_ignored() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&answer("srv-999", r#"{"action":"accept","content":{"approve":true}}"#)).await;
+        client.send(&ask_call(2)).await;
+        let id = client.next().await["id"].as_str().unwrap().to_string();
+        assert_ne!(id, "srv-999");
+        client.send(&answer("srv-999", r#"{"action":"accept","content":{"approve":true}}"#)).await;
+        client.send(&answer(&id, r#"{"action":"decline"}"#)).await;
+        assert_eq!(text(&client.next().await), "declined", "only the answer to the real question counts");
+        client.finish().await;
+    }
+
+    #[tokio::test]
+    async fn a_client_that_leaves_while_being_asked_is_a_no_and_the_server_still_exits() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        let _question = client.next().await;
+        let rest = client.finish().await;
+        assert_eq!(rest.len(), 1, "{rest:?}");
+        assert!(text(&rest[0]).contains("went away"), "{}", text(&rest[0]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_question_nobody_answers_times_out_as_unavailable_and_is_withdrawn() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        let question = client.next_when_time_is_paused().await;
+        // Time is paused and auto-advances while everything waits, so the approval timeout elapses at once.
+        let withdrawn = client.next_when_time_is_paused().await;
+        assert_eq!(withdrawn["method"], "notifications/cancelled");
+        assert_eq!(withdrawn["params"]["requestId"], question["id"]);
+        let reply = client.next_when_time_is_paused().await;
+        assert!(text(&reply).contains("did not answer in time"), "{}", text(&reply));
+        client.finish().await;
+    }
+
+    #[tokio::test]
+    async fn two_questions_at_once_are_answered_to_the_right_calls() {
+        let mut client = legacy_client(r#"{"elicitation":{}}"#).await;
+        client.send(&ask_call(2)).await;
+        client.send(&ask_call(3)).await;
+        let (a, b) = (client.next().await, client.next().await);
+        let (first, second) = (a["id"].as_str().unwrap().to_string(), b["id"].as_str().unwrap().to_string());
+        assert_ne!(first, second);
+        // Answer them in the opposite order: the second question gets a yes, the first a no.
+        client.send(&answer(&second, r#"{"action":"accept","content":{"approve":true}}"#)).await;
+        client.send(&answer(&first, r#"{"action":"decline"}"#)).await;
+        let mut by_call = std::collections::HashMap::new();
+        for _ in 0..2 {
+            let reply = client.next().await;
+            by_call.insert(reply["id"].as_i64().unwrap(), text(&reply));
+        }
+        let call_of = |question: &Value| if question["id"] == a["id"] { 2 } else { 3 };
+        assert_eq!(by_call[&call_of(&b)], "approved");
+        assert_eq!(by_call[&call_of(&a)], "declined");
+        client.finish().await;
     }
 }

@@ -15,7 +15,7 @@
 //! write lock that makes one writer of the data root arrives with the local host (T1); until then a tool that
 //! changes anything is neither listed nor callable, which the tests pin.
 
-use crate::mcp_protocol::{CallError, ToolBackend, ToolResult, ToolSpec};
+use crate::mcp_protocol::{CallContext, CallError, ToolBackend, ToolResult, ToolSpec};
 use async_trait::async_trait;
 use local_app_service::mcp_server::{LocalAppsMcpHost, LocalAppsMcpTransport};
 use local_app_service::tool_names::LOCAL_APP_TOOLS;
@@ -164,7 +164,7 @@ impl ToolBackend for LocalAppBackend {
         self.tools.clone()
     }
 
-    async fn call(&self, name: &str, arguments: Value) -> Result<ToolResult, CallError> {
+    async fn call(&self, name: &str, arguments: Value, _context: &CallContext) -> Result<ToolResult, CallError> {
         let Some(operation) = self.operations.get(name) else {
             return Err(CallError::UnknownTool(name.to_string()));
         };
@@ -189,6 +189,10 @@ impl ToolBackend for LocalAppBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ctx() -> CallContext {
+        CallContext { approver: std::sync::Arc::new(crate::mcp_protocol::NoApprover("no client in this test")) }
+    }
 
     async fn backend() -> (tempfile::TempDir, LocalAppBackend) {
         let root = tempfile::tempdir().expect("tempdir");
@@ -235,7 +239,7 @@ mod tests {
                 .map(|r| r.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             let arguments: serde_json::Map<String, Value> = required.iter().map(|key| (key.clone(), json!("no-such-app"))).collect();
-            let result = backend.call(&tool.name, Value::Object(arguments)).await.unwrap_or_else(|e| panic!("{}: {e:?}", tool.name));
+            let result = backend.call(&tool.name, Value::Object(arguments), &ctx()).await.unwrap_or_else(|e| panic!("{}: {e:?}", tool.name));
             let text = serde_json::to_string(&result.content).unwrap();
             assert!(!text.contains("unsupported_on_this_host"), "{} is listed but unsupported: {text}", tool.name);
         }
@@ -245,7 +249,7 @@ mod tests {
     async fn a_mutating_operation_is_not_callable_even_by_name() {
         let (root, backend) = backend().await;
         for name in ["LocalAppCreate", "LocalAppScaffold", "LocalAppManifest", "LocalAppBuild", "create", "list"] {
-            let outcome = backend.call(name, json!({"name": "x"})).await;
+            let outcome = backend.call(name, json!({"name": "x"}), &ctx()).await;
             assert_eq!(outcome.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
         }
         // Opening the store writes its own index and nothing else; in particular no app directory appeared.
@@ -259,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn listing_an_empty_store_answers_from_the_service() {
         let (_root, backend) = backend().await;
-        let result = backend.call("LocalAppList", json!({})).await.expect("call");
+        let result = backend.call("LocalAppList", json!({}), &ctx()).await.expect("call");
         assert!(!result.is_error, "{result:?}");
         let structured = result.structured.expect("structured content");
         assert_eq!(structured["count"], 0);
@@ -270,10 +274,10 @@ mod tests {
     #[tokio::test]
     async fn reading_an_app_that_does_not_exist_is_a_result_the_model_can_read() {
         let (_root, backend) = backend().await;
-        let result = backend.call("LocalAppGet", json!({"app_id": "nothing-here"})).await.expect("call");
+        let result = backend.call("LocalAppGet", json!({"app_id": "nothing-here"}), &ctx()).await.expect("call");
         assert!(result.is_error, "{result:?}");
         // A missing argument is likewise a failure to read, not a fault of the server.
-        let missing = backend.call("LocalAppGet", json!({})).await.expect("call");
+        let missing = backend.call("LocalAppGet", json!({}), &ctx()).await.expect("call");
         assert!(missing.is_error, "{missing:?}");
     }
 
@@ -281,7 +285,7 @@ mod tests {
     async fn an_operation_that_needs_a_screen_or_a_runtime_is_not_offered_at_all() {
         let (_root, backend) = backend().await;
         for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppRuntimeProfiles", "LocalAppTemplateCatalog", "LocalAppQaReadEvidence"] {
-            assert_eq!(backend.call(name, json!({"app_id": "any-app"})).await.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
+            assert_eq!(backend.call(name, json!({"app_id": "any-app"}), &ctx()).await.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
         }
     }
 

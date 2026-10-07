@@ -13,9 +13,12 @@
 //! `initialize` selects legacy semantics. Anything else before a session exists is refused with a message that
 //! names both ways in, because a legacy client has no other way to learn why it was refused.
 //!
-//! This server never sends a request to the client. A modern client would receive server-to-client interaction as
-//! an `input_required` result (multi round-trip requests), a legacy one as an `elicitation/create` request; neither
-//! is produced here, so a tool that would need the person's answer reports that it cannot be done on this host.
+//! **Asking the person.** A tool that needs the person's approval asks through its [`CallContext`]'s [`Approver`]. In a
+//! legacy session that is an `elicitation/create` request sent to the client while the call waits for the answer. A
+//! modern client can only be asked through an `input_required` result (multi round-trip requests), which this server
+//! does not produce yet. Every way the question cannot be put or answered (the client declared no elicitation
+//! support, the modern generation, a timeout, a malformed answer, a closed stream) is [`Approval::Unavailable`] or
+//! [`Approval::Declined`], never an approval: asking fails closed.
 //!
 //! What the tools are, and what they do, is the [`ToolBackend`]'s business. Everything here is testable with a
 //! backend that is a table.
@@ -23,7 +26,8 @@
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 /// The stateless generation.
 pub const MODERN_VERSION: &str = "2026-07-28";
@@ -34,6 +38,7 @@ pub const SUPPORTED_VERSIONS: [&str; 2] = [MODERN_VERSION, LEGACY_VERSION];
 
 const META_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";
+const META_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 
 /// JSON-RPC error codes this server produces.
 pub mod code {
@@ -110,13 +115,144 @@ pub enum CallError {
     Internal(String),
 }
 
+/// A question for the person, put by the server and answered yes or no.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalRequest {
+    /// What the person is asked to approve, in full: the client shows this text and nothing the model wrote
+    /// beyond what the server chose to quote in it.
+    pub message: String,
+    /// The label of the yes/no field.
+    pub question: String,
+}
+
+/// The answer to an [`ApprovalRequest`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Approval {
+    /// The person said yes.
+    Approved,
+    /// The person said no, dismissed the question, or answered in a way that is not a clear yes.
+    Declined,
+    /// The question could not be put or answered. The reason is for the model and the person to read.
+    Unavailable(String),
+}
+
+/// Something that can ask the person.
+#[async_trait]
+pub trait Approver: Send + Sync {
+    /// Ask. Only [`Approval::Approved`] is permission.
+    async fn ask(&self, request: ApprovalRequest) -> Approval;
+}
+
+/// What a call may use besides its arguments.
+#[derive(Clone)]
+pub struct CallContext {
+    /// How to ask the person.
+    pub approver: Arc<dyn Approver>,
+}
+
+/// An approver that never asks: every question is unavailable. For calls with no client to ask, and for tests.
+pub struct NoApprover(pub &'static str);
+
+#[async_trait]
+impl Approver for NoApprover {
+    async fn ask(&self, _request: ApprovalRequest) -> Approval {
+        Approval::Unavailable(self.0.to_string())
+    }
+}
+
 /// What the protocol layer serves.
 #[async_trait]
 pub trait ToolBackend: Send + Sync {
     /// Every tool, in a deterministic order.
     fn tools(&self) -> Vec<ToolSpec>;
     /// Run one tool. `arguments` is always a JSON object.
-    async fn call(&self, name: &str, arguments: Value) -> Result<ToolResult, CallError>;
+    async fn call(&self, name: &str, arguments: Value, context: &CallContext) -> Result<ToolResult, CallError>;
+}
+
+/// Why a request to the client got no result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkError {
+    /// The client answered with a JSON-RPC error.
+    Rejected(String),
+    /// No answer came in time.
+    TimedOut,
+    /// The stream closed first.
+    Closed,
+}
+
+/// The way back to the client: how a server sends it a request and waits for the answer.
+#[async_trait]
+pub trait ClientLink: Send + Sync {
+    /// Send a request and wait up to `timeout` for its result. If the wait is abandoned (the future is dropped) the
+    /// client is told the request is cancelled.
+    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, LinkError>;
+}
+
+/// How long the person has to answer a question.
+pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Which generation a call arrived in, and what that client can be asked.
+struct Asking {
+    link: Option<Arc<dyn ClientLink>>,
+    modern: bool,
+    elicitation: bool,
+}
+
+#[async_trait]
+impl Approver for Asking {
+    async fn ask(&self, request: ApprovalRequest) -> Approval {
+        if !self.elicitation {
+            return Approval::Unavailable(
+                "the client did not declare support for elicitation, so the person cannot be asked, and this action \
+                 needs their approval. Nothing was done."
+                    .into(),
+            );
+        }
+        if self.modern {
+            return Approval::Unavailable(
+                "this client speaks protocol 2026-07-28, where the person can only be asked through a multi round-trip \
+                 request, which this server does not support yet. Nothing was done."
+                    .into(),
+            );
+        }
+        let Some(link) = &self.link else {
+            return Approval::Unavailable("there is no way to reach the client from here. Nothing was done.".into());
+        };
+        let params = json!({
+            "message": request.message,
+            "requestedSchema": {
+                "type": "object",
+                "properties": {"approve": {"type": "boolean", "title": request.question, "default": false}},
+                "required": ["approve"],
+            },
+        });
+        match link.request("elicitation/create", params, APPROVAL_TIMEOUT).await {
+            Ok(result) => decision(&result),
+            Err(LinkError::Rejected(why)) => Approval::Unavailable(format!("the client refused the question: {why}")),
+            Err(LinkError::TimedOut) => Approval::Unavailable("the person did not answer in time. Nothing was done.".into()),
+            Err(LinkError::Closed) => Approval::Unavailable("the client went away before answering. Nothing was done.".into()),
+        }
+    }
+}
+
+/// Read an elicitation result. Only an explicit `accept` with `approve: true` is a yes; every other shape is a no.
+fn decision(result: &Value) -> Approval {
+    let accepted = result.get("action").and_then(Value::as_str) == Some("accept");
+    let approved = result.pointer("/content/approve").and_then(Value::as_bool) == Some(true);
+    if accepted && approved {
+        Approval::Approved
+    } else {
+        Approval::Declined
+    }
+}
+
+/// Whether a client's declared capabilities let a form question be put: `elicitation` present, and either empty
+/// (form mode, by the specification's backwards-compatibility rule) or naming `form`.
+fn can_elicit(capabilities: Option<&Value>) -> bool {
+    match capabilities.and_then(|c| c.get("elicitation")) {
+        Some(Value::Object(map)) => map.is_empty() || map.contains_key("form"),
+        _ => false,
+    }
 }
 
 /// One client's conversation with the server: the protocol state and the backend it reaches.
@@ -125,6 +261,10 @@ pub struct Session<B> {
     identity: ServerIdentity,
     legacy_initialize_seen: AtomicBool,
     legacy_initialized: AtomicBool,
+    /// What the legacy client declared at `initialize`.
+    legacy_capabilities: Mutex<Option<Value>>,
+    /// The way back to the client, set by the transport that serves the session.
+    link: OnceLock<Arc<dyn ClientLink>>,
 }
 
 /// The protocol layer's answer to one message.
@@ -169,7 +309,14 @@ impl<B: ToolBackend> Session<B> {
             identity,
             legacy_initialize_seen: AtomicBool::new(false),
             legacy_initialized: AtomicBool::new(false),
+            legacy_capabilities: Mutex::new(None),
+            link: OnceLock::new(),
         }
+    }
+
+    /// Give the session the way back to its client. The transport does this once, before serving.
+    pub fn attach_link(&self, link: Arc<dyn ClientLink>) {
+        let _ = self.link.set(link);
     }
 
     /// Answer one parsed message.
@@ -261,7 +408,7 @@ impl<B: ToolBackend> Session<B> {
                 self.stamp_server_info(&mut result);
                 ok_response(id, result)
             }
-            "tools/call" => match self.call(params).await {
+            "tools/call" => match self.call(params, true).await {
                 Ok(tool) => {
                     let mut result = tool_result_json(&tool, true);
                     self.stamp_server_info(&mut result);
@@ -310,6 +457,7 @@ impl<B: ToolBackend> Session<B> {
         // A client that asks for a version this server does not serve is answered with the one it does, and
         // decides for itself whether to continue: that is the legacy negotiation.
         self.legacy_initialize_seen.store(true, Ordering::SeqCst);
+        *self.legacy_capabilities.lock().expect("capabilities") = params.and_then(|p| p.get("capabilities")).cloned();
         let mut result = json!({
             "protocolVersion": LEGACY_VERSION,
             "capabilities": capabilities(),
@@ -339,7 +487,7 @@ impl<B: ToolBackend> Session<B> {
         }
         match method {
             "tools/list" => ok_response(id, json!({"tools": self.tool_definitions()})),
-            "tools/call" => match self.call(params).await {
+            "tools/call" => match self.call(params, false).await {
                 Ok(tool) => ok_response(id, tool_result_json(&tool, false)),
                 Err(error) => call_failure(id, error),
             },
@@ -355,7 +503,7 @@ impl<B: ToolBackend> Session<B> {
         tools.iter().map(tool_json).collect()
     }
 
-    async fn call(&self, params: Option<&Map<String, Value>>) -> Result<ToolResult, CallFailure> {
+    async fn call(&self, params: Option<&Map<String, Value>>, modern: bool) -> Result<ToolResult, CallFailure> {
         let params = params.ok_or_else(|| CallFailure::Invalid("tools/call needs params".into()))?;
         let name = params
             .get("name")
@@ -366,7 +514,19 @@ impl<B: ToolBackend> Session<B> {
             Some(value @ Value::Object(_)) => value.clone(),
             Some(_) => return Err(CallFailure::Invalid("params.arguments must be an object".into())),
         };
-        self.backend.call(name, arguments).await.map_err(|error| match error {
+        let capabilities = if modern {
+            params.get("_meta").and_then(|m| m.get(META_CLIENT_CAPABILITIES)).cloned()
+        } else {
+            self.legacy_capabilities.lock().expect("capabilities").clone()
+        };
+        let context = CallContext {
+            approver: Arc::new(Asking {
+                link: self.link.get().cloned(),
+                modern,
+                elicitation: can_elicit(capabilities.as_ref()),
+            }),
+        };
+        self.backend.call(name, arguments, &context).await.map_err(|error| match error {
             CallError::UnknownTool(tool) => CallFailure::Invalid(format!("Unknown tool: {tool}")),
             CallError::Internal(message) => CallFailure::Internal(message),
         })
@@ -466,7 +626,7 @@ mod tests {
                 .collect()
         }
 
-        async fn call(&self, name: &str, arguments: Value) -> Result<ToolResult, CallError> {
+        async fn call(&self, name: &str, arguments: Value, _context: &CallContext) -> Result<ToolResult, CallError> {
             match name {
                 "alpha" => Ok(ToolResult {
                     content: vec![json!({"type": "text", "text": "ok"})],

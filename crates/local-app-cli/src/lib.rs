@@ -17,7 +17,8 @@ pub use data_root::{resolve_data_root, DataRoot, DataRootSource};
 pub use doctor::{run_doctor, run_doctor_with, Check, CheckStatus, Report};
 pub use mcp_backend::{LocalAppBackend, UnsupportedHost, SERVED, UNSUPPORTED};
 pub use mcp_protocol::{
-    CallError, Reply, ServerIdentity, Session, ToolBackend, ToolResult, ToolSpec, LEGACY_VERSION, MODERN_VERSION,
+    Approval, ApprovalRequest, Approver, CallContext, CallError, ClientLink, LinkError, NoApprover, Reply, ServerIdentity,
+    Session, ToolBackend, ToolResult, ToolSpec, APPROVAL_TIMEOUT, LEGACY_VERSION, MODERN_VERSION,
     SUPPORTED_VERSIONS,
 };
 pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
