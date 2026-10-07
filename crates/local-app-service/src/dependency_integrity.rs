@@ -824,6 +824,43 @@ pub const TRUSTED_TOOLCHAIN_NATIVE_BINDINGS: &[(&str, &str, &str)] = &[
         "1.33.0",
         "lightningcss.linux-x64-musl.node",
     ),
+    // A Mac host builds without a guest, so pnpm installs the darwin builds of the same three packages at the same
+    // versions the template lockfiles pin (rolldown 1.2.9, rollup 4.44.0, lightningcss 1.33.0, for arm64 and x64). The
+    // trust is the musl entries' trust, by platform: no other package and no other version.
+    (
+        "@rolldown/binding-darwin-arm64",
+        "1.2.9",
+        "rolldown-binding.darwin-arm64.node",
+    ),
+    (
+        "@rolldown/binding-darwin-x64",
+        "1.2.9",
+        "rolldown-binding.darwin-x64.node",
+    ),
+    (
+        "@rollup/rollup-darwin-arm64",
+        "4.44.0",
+        "rollup.darwin-arm64.node",
+    ),
+    (
+        "@rollup/rollup-darwin-x64",
+        "4.44.0",
+        "rollup.darwin-x64.node",
+    ),
+    (
+        "lightningcss-darwin-arm64",
+        "1.33.0",
+        "lightningcss.darwin-arm64.node",
+    ),
+    (
+        "lightningcss-darwin-x64",
+        "1.33.0",
+        "lightningcss.darwin-x64.node",
+    ),
+    // `fsevents` is the file watcher's optional dependency, installed on macOS only (so the Linux guest never has it),
+    // and every template lockfile pins 2.3.3. It is loaded by watch mode, which a fixed build never starts; it is
+    // listed because the tree check refuses any native addon that is not, wherever it would run.
+    ("fsevents", "2.3.3", "fsevents.node"),
 ];
 
 pub const TRUSTED_TOOLCHAIN_LIFECYCLE_SCRIPTS: &[(&str, &str, &[&str])] = &[
