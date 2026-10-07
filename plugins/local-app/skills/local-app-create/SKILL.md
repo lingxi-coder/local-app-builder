@@ -25,6 +25,8 @@ its result before the next.
 7. **Build.** `LocalAppBuild` with the `app_id`, and the `workflow_run_id` (the `execution_id` that prepare returned)
    and `contract_handle` it returned. A successful build is the completion condition. If it fails, read
    `LocalAppLogs` with `log` set to `build`, fix the source and build again.
+8. **Show it (when the person wants to see it).** `LocalAppRuntime` with `action` `start`, then give the person the
+   `url` it returns. Say what a browser cannot do yet (see the `local-app` skill) instead of claiming the app works.
 
 ## The plan's machine-readable block
 

@@ -40,10 +40,21 @@ These tools change things. The steps and the plan file are in the `local-app-cre
 | `LocalAppConfirmDependencyChange` | Propose adding, updating or removing an npm dependency. The person is asked to approve it, and approval returns a receipt. |
 | `LocalAppUpdateDependencies` | Apply an approved dependency change with its receipt: resolve, check, rebuild, and replace together or not at all. |
 
+## Running an app
+
+| Tool | Use it to |
+| --- | --- |
+| `LocalAppRuntime` | Serve a built app's pages on this computer. `action` is `start` (returns a `url` on 127.0.0.1 for the person to open in a browser), `stop`, or `restart` (serves the latest build). Needs `app_id`; the app must be built first. |
+
+The page is served for as long as the server process runs, and another process cannot change the data root while it
+is. A browser has none of the native host's bridge yet, so an app that stores data, calls the network or uses a device
+feature shows an error where it does; tell the person that rather than reporting the app as working. After a rebuild
+or a dependency change, `restart` it.
+
 ## What you cannot do yet
 
-This server does not run an app or look at its screen, and the tools for those are not listed. If the user asks for one
-of those, say that this plugin cannot do it yet. Do not try to do it by writing files into the data root by hand outside
+This server does not look at an app's screen or read its stored data, and the tools for those are not listed. If the
+user asks for one of those, say that this plugin cannot do it yet. Do not try to do it by writing files into the data root by hand outside
 an app's own workspace: the app store keeps records that hand-written files would not match, and a build needs the
 verified toolchain that only the `local-app` command provides.
 

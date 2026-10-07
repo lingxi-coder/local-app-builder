@@ -113,6 +113,21 @@ impl Client {
     }
 }
 
+/// One plain HTTP/1.1 GET to a loopback `url`: the status line, the header block and the body.
+fn http_get(url: &str) -> std::io::Result<(String, String, Vec<u8>)> {
+    use std::io::Read;
+    let address = url.strip_prefix("http://").expect("an http url");
+    let mut stream = std::net::TcpStream::connect(address)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    write!(stream, "GET / HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw)?;
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").expect("a header block");
+    let head = String::from_utf8_lossy(&raw[..split]).to_string();
+    let (status, headers) = head.split_once("\r\n").unwrap_or((&head, ""));
+    Ok((status.to_string(), headers.to_string(), raw[split + 4..].to_vec()))
+}
+
 fn app_id(structured: &Value) -> String {
     structured["app"]["id"].as_str().or_else(|| structured["id"].as_str()).or_else(|| structured["app_id"].as_str()).unwrap_or_else(|| panic!("no app id in {structured}")).to_string()
 }
@@ -223,6 +238,19 @@ fn the_whole_flow_with_the_real_toolchain() {
     assert!(!is_error, "{said}");
     eprintln!("app after build: {got}");
 
+    // Run it: the build is served on a loopback address, and stopping it closes the address.
+    let (is_error, said, started) = client.call("LocalAppRuntime", json!({"app_id": id, "action": "start"}), Person::Approves);
+    assert!(!is_error, "start: {said}");
+    let url = started["url"].as_str().unwrap_or_else(|| panic!("no url in {started}")).to_string();
+    assert!(url.starts_with("http://127.0.0.1:"), "{url}");
+    let (status, headers, body) = http_get(&url).expect("the served page");
+    assert!(status.contains("200"), "{status}");
+    assert!(headers.to_lowercase().contains("content-security-policy"), "{headers}");
+    assert!(String::from_utf8_lossy(&body).contains("<div id=\"root\""), "not the app's page");
+    let (is_error, said, _) = client.call("LocalAppRuntime", json!({"app_id": id, "action": "stop"}), Person::Approves);
+    assert!(!is_error, "stop: {said}");
+    assert!(http_get(&url).is_err(), "the address is still served after stop");
+
     // A dependency change: the person says no first, and nothing is issued.
     let change = json!([{"kind": "add", "package": "dayjs", "version": "1.11.13"}]);
     let asked = client.questions.len();
@@ -238,5 +266,19 @@ fn the_whole_flow_with_the_real_toolchain() {
     assert!(!is_error, "update: {said}");
     let package_json = std::fs::read_to_string(data.join("apps").join(&id).join("workspace/package.json")).unwrap();
     assert!(package_json.contains("\"dayjs\""), "{package_json}");
+
+    // The build changed, so the page is served from the new one; then the process goes away and takes the address with it.
+    let (is_error, said, restarted) = client.call("LocalAppRuntime", json!({"app_id": id, "action": "restart"}), Person::Approves);
+    assert!(!is_error, "restart: {said}");
+    let url = restarted["url"].as_str().unwrap().to_string();
+    assert!(http_get(&url).expect("the restarted page").0.contains("200"));
     client.finish();
+    assert!(http_get(&url).is_err(), "the page outlived the server process");
+
+    // A later process finds the app as it was left and runs it again.
+    let mut again = Client::start(&data, json!({"elicitation": {}}));
+    let (is_error, said, started) = again.call("LocalAppRuntime", json!({"app_id": id, "action": "start"}), Person::Approves);
+    assert!(!is_error, "start after restart: {said}");
+    assert!(http_get(started["url"].as_str().unwrap()).expect("the page after the restart").0.contains("200"));
+    again.finish();
 }

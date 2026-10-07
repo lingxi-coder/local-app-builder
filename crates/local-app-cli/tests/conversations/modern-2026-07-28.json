@@ -135,7 +135,7 @@
         "id": 5,
         "method": "tools/call",
         "params": {
-          "name": "LocalAppRuntime",
+          "name": "LocalAppInspectUi",
           "arguments": {
             "app_id": "any-app"
           },
@@ -153,7 +153,7 @@
         "id": 5,
         "error": {
           "code": -32602,
-          "message": "Unknown tool: LocalAppRuntime"
+          "message": "Unknown tool: LocalAppInspectUi"
         }
       }
     },

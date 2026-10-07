@@ -4,7 +4,8 @@
 //! making one (create the empty app, prepare it from an approved plan, install its dependencies, build it, declare its
 //! manifest). [`SERVED_READ`] and [`SERVED_WRITE`] name them, and each addition comes with the capability that makes it
 //! work: a tool that would answer "unsupported" to every call is not listed, because it costs the model context and
-//! invites a call that cannot succeed. Running an app and driving its screen are not here yet.
+//! invites a call that cannot succeed. Running an app serves its build on a loopback address; driving its screen is not here
+//! yet, and neither is the page's connection to the host (see `manage_runtime`).
 //!
 //! **Who approves.** Creating an app from a plan, and changing its dependencies, need the person's yes. The service
 //! was written for a host with a native sheet; here the question is put through MCP elicitation
@@ -50,6 +51,7 @@ pub const SERVED_WRITE: &[&str] = &[
     "update_manifest",
     "confirm_dependency_change",
     "update_dependencies",
+    "manage_runtime",
 ];
 
 /// The largest plan the person is asked to read. A plan they cannot reasonably read is not one they can approve.
@@ -111,6 +113,16 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
          failure restores the previous dependencies and build.",
     ),
     (
+        "manage_runtime",
+        "Serve a built app's pages on this computer so the person can look at them: `start` returns a `url` on 127.0.0.1 \
+         for them to open in a browser, `stop` ends it, `restart` serves the latest build. The app must have been built \
+         first (`LocalAppBuild`). The address is reachable only from this computer. What the app shows is what it was \
+         built to show; its own data storage, network access and device features are supplied by a native host and are \
+         not available in a plain browser yet, so a page that needs them shows an error where they are used. The page is \
+         served for as long as this server process runs, and while it is served no other process can change the data \
+         root.",
+    ),
+    (
         "update_manifest",
         "Declare the app's data collections, allowed network domains and capabilities in its manifest. Every collection is \
          `{id,name,fields}` and every field is `{id,label,kind,required?,enumOptions?}`; ids are lower snake_case. \
@@ -168,6 +180,10 @@ impl LocalAppBackend {
             if *operation == "prepare" {
                 input_schema["properties"]["plan_path"]["description"] =
                     json!("Absolute path of the Markdown plan file you wrote, with its `authoring-spec` block.");
+            }
+            if *operation == "manage_runtime" {
+                // `open`, `suspend` and `resume` are the LingXi apps' own screen and background-state controls.
+                input_schema["properties"]["action"] = json!({"enum": ["start", "stop", "restart"]});
             }
             if *operation == "confirm_dependency_change" {
                 input_schema["properties"]["changes"] = json!({
@@ -353,6 +369,7 @@ mod tests {
                 "LocalAppManifest",
                 "LocalAppConfirmDependencyChange",
                 "LocalAppUpdateDependencies",
+                "LocalAppRuntime",
             ]
             .contains(&tool.name.as_str());
             assert_eq!(tool.read_only, !writes, "{}", tool.name);
@@ -388,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn an_operation_that_needs_a_screen_or_a_runtime_is_not_offered_at_all() {
         let (_root, backend) = backend().await;
-        for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppRuntime", "LocalAppScaffold", "LocalAppActOnUi", "create", "list"] {
+        for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppScaffold", "LocalAppActOnUi", "create", "list"] {
             assert_eq!(backend.call(name, json!({"app_id": "any-app"}), &ctx()).await.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
         }
     }
