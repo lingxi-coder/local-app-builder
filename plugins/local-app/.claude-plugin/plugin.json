@@ -1,0 +1,9 @@
+{
+  "name": "local-app",
+  "displayName": "Local App",
+  "version": "0.1.0",
+  "description": "Read the Local Apps on this machine from Claude Code: list them and read an app's record, logs, checkpoints and background tasks.",
+  "author": { "name": "Local App" },
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["local-app", "mcp"]
+}
