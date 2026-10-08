@@ -3,7 +3,7 @@
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use local_app_builder_cli::{run, run_toolchain, Env};
+use local_app_builder_cli::{run_toolchain, Env};
 use local_app_builder_host::{Artifact, Spec};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -189,6 +189,8 @@ fn usage_errors_are_exit_code_two_and_a_machine_without_pins_is_one() {
 #[cfg(target_os = "macos")]
 #[test]
 fn the_real_entry_point_asks_for_the_real_pins() {
+    use local_app_builder_cli::run;
+
     let root = tempfile::tempdir().unwrap();
     let args: Vec<String> = ["toolchain", "status", "--data-root", &data(root.path())]
         .map(String::from)
