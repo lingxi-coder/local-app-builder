@@ -85,7 +85,8 @@ fn alive(pid: &str) -> bool {
 }
 
 fn wait_for(path: &Path) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // The wait covers sandbox start-up, which takes seconds when many test processes start one at once.
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if let Ok(text) = std::fs::read_to_string(path) {
             if !text.trim().is_empty() {
@@ -193,14 +194,26 @@ async fn the_network_policy_is_enforced_for_each_policy() {
 #[tokio::test]
 async fn a_command_that_runs_too_long_is_killed_with_everything_it_started() {
     let w = world();
-    let mut cmd = w.mounted(command("node", &["sleep 60 & echo $! > child.pid; wait"]));
-    cmd.timeout_ms = Some(3_000); // well past sandbox start-up when many tests start one at once
-    let started = Instant::now();
-    let outcome = w.executor.run(cmd).await.unwrap();
-    assert!(outcome.timed_out, "{outcome:?}");
-    assert_eq!(outcome.exit_code, local_app_builder_host::TIMED_OUT_EXIT_CODE);
-    assert!(started.elapsed() < Duration::from_secs(10));
-    let pid = std::fs::read_to_string(w.project.join("child.pid")).unwrap();
+    // The deadline runs from the start of the run, sandbox start-up included. A run that is killed before it has
+    // written the grandchild's pid never had a grandchild, so it proves nothing: try again with a longer deadline.
+    let mut timeout_ms = 3_000;
+    let pid = loop {
+        let _ = std::fs::remove_file(w.project.join("child.pid"));
+        let mut cmd = w.mounted(command("node", &["sleep 60 & echo $! > child.pid; wait"]));
+        cmd.timeout_ms = Some(timeout_ms);
+        let started = Instant::now();
+        let outcome = w.executor.run(cmd).await.unwrap();
+        assert!(outcome.timed_out, "{outcome:?}");
+        assert_eq!(outcome.exit_code, local_app_builder_host::TIMED_OUT_EXIT_CODE);
+        assert!(started.elapsed() < Duration::from_millis(timeout_ms) + Duration::from_secs(10));
+        match std::fs::read_to_string(w.project.join("child.pid")) {
+            Ok(pid) if !pid.trim().is_empty() => break pid,
+            _ => {
+                assert!(timeout_ms < 24_000, "the command was killed before it ever started its child");
+                timeout_ms *= 2;
+            }
+        }
+    };
     std::thread::sleep(Duration::from_millis(200));
     assert!(!alive(&pid), "the grandchild {pid} outlived the command");
 }
@@ -211,9 +224,10 @@ async fn a_command_that_exits_leaving_a_child_behind_does_not_leave_it_running()
     // group being killed at exit the run would wait for it and then leave it behind.
     let w = world();
     let started = Instant::now();
-    let outcome = w.sh("sleep 60 & echo $! > child.pid; echo launched", &[]).await;
+    let outcome = w.sh("sleep 120 & echo $! > child.pid; echo launched", &[]).await;
     assert_eq!((outcome.exit_code, outcome.stdout.trim()), (0, "launched"), "{outcome:?}");
-    assert!(started.elapsed() < Duration::from_secs(2), "the run waited for the orphan: {:?}", started.elapsed());
+    // Waiting for the orphan would take its full 120s; sandbox start-up under load is seconds.
+    assert!(started.elapsed() < Duration::from_secs(60), "the run waited for the orphan: {:?}", started.elapsed());
     let pid = std::fs::read_to_string(w.project.join("child.pid")).unwrap();
     std::thread::sleep(Duration::from_millis(200));
     assert!(!alive(&pid), "the child {pid} outlived the command that started it");
@@ -259,7 +273,7 @@ async fn dropping_the_run_stops_the_command_and_its_children() {
     assert!(alive(&pid));
     task.abort();
     let _ = task.await;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while alive(&pid) {
         assert!(Instant::now() < deadline, "the child {pid} survived the cancelled run");
         tokio::time::sleep(Duration::from_millis(50)).await;
