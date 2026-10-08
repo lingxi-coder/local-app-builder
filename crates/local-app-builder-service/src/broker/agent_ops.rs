@@ -156,11 +156,13 @@ impl AgentOutputStream {
         let Some(stream_id) = &self.stream_id else {
             return;
         };
-        self.emit_frame(local_app_builder_contracts::bridge::BridgeStreamFrame::Started {
-            app_id: self.app_id.clone(),
-            request_id: self.request_id.clone(),
-            stream_id: stream_id.clone(),
-        })
+        self.emit_frame(
+            local_app_builder_contracts::bridge::BridgeStreamFrame::Started {
+                app_id: self.app_id.clone(),
+                request_id: self.request_id.clone(),
+                stream_id: stream_id.clone(),
+            },
+        )
         .await;
     }
 
@@ -169,12 +171,14 @@ impl AgentOutputStream {
             return;
         };
         let seq = self.next_seq.load(Ordering::Relaxed);
-        self.emit_frame(local_app_builder_contracts::bridge::BridgeStreamFrame::Completed {
-            app_id: self.app_id.clone(),
-            request_id: self.request_id.clone(),
-            stream_id: stream_id.clone(),
-            seq,
-        })
+        self.emit_frame(
+            local_app_builder_contracts::bridge::BridgeStreamFrame::Completed {
+                app_id: self.app_id.clone(),
+                request_id: self.request_id.clone(),
+                stream_id: stream_id.clone(),
+                seq,
+            },
+        )
         .await;
     }
 
@@ -183,13 +187,15 @@ impl AgentOutputStream {
             return;
         };
         let seq = self.next_seq.load(Ordering::Relaxed);
-        self.emit_frame(local_app_builder_contracts::bridge::BridgeStreamFrame::Cancelled {
-            app_id: self.app_id.clone(),
-            request_id: self.request_id.clone(),
-            stream_id: stream_id.clone(),
-            seq,
-            reason: reason.into(),
-        })
+        self.emit_frame(
+            local_app_builder_contracts::bridge::BridgeStreamFrame::Cancelled {
+                app_id: self.app_id.clone(),
+                request_id: self.request_id.clone(),
+                stream_id: stream_id.clone(),
+                seq,
+                reason: reason.into(),
+            },
+        )
         .await;
     }
 
@@ -198,14 +204,16 @@ impl AgentOutputStream {
             return;
         };
         let seq = self.next_seq.load(Ordering::Relaxed);
-        self.emit_frame(local_app_builder_contracts::bridge::BridgeStreamFrame::Error {
-            app_id: self.app_id.clone(),
-            request_id: self.request_id.clone(),
-            stream_id: stream_id.clone(),
-            seq,
-            code: code.into(),
-            message: message.into(),
-        })
+        self.emit_frame(
+            local_app_builder_contracts::bridge::BridgeStreamFrame::Error {
+                app_id: self.app_id.clone(),
+                request_id: self.request_id.clone(),
+                stream_id: stream_id.clone(),
+                seq,
+                code: code.into(),
+                message: message.into(),
+            },
+        )
         .await;
     }
 
@@ -264,13 +272,15 @@ impl AgentOutputStream {
             return;
         };
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
-        self.emit_frame(local_app_builder_contracts::bridge::BridgeStreamFrame::Data {
-            app_id: self.app_id.clone(),
-            request_id: self.request_id.clone(),
-            stream_id: stream_id.clone(),
-            seq,
-            data_json: serde_json::json!({"text": text}).to_string(),
-        })
+        self.emit_frame(
+            local_app_builder_contracts::bridge::BridgeStreamFrame::Data {
+                app_id: self.app_id.clone(),
+                request_id: self.request_id.clone(),
+                stream_id: stream_id.clone(),
+                seq,
+                data_json: serde_json::json!({"text": text}).to_string(),
+            },
+        )
         .await;
     }
 }

@@ -102,8 +102,23 @@ impl Lease {
 
     /// A lease with its own timings (tests).
     #[must_use]
-    pub fn with_timings(root: PathBuf, config: HostConfig, wait: Duration, idle: Duration) -> Arc<Self> {
-        Arc::new(Self { root, config, wait, idle, state: Mutex::new(State { held: None, users: 0, epoch: 0 }) })
+    pub fn with_timings(
+        root: PathBuf,
+        config: HostConfig,
+        wait: Duration,
+        idle: Duration,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            root,
+            config,
+            wait,
+            idle,
+            state: Mutex::new(State {
+                held: None,
+                users: 0,
+                epoch: 0,
+            }),
+        })
     }
 
     /// Get a turn: the loaded data root, held by this process until the returned [`Use`] and every other are dropped
@@ -116,19 +131,34 @@ impl Lease {
         if let Some(host) = state.held.as_ref().map(|held| Arc::clone(&held.host)) {
             state.users += 1;
             state.epoch += 1;
-            return Ok(Use { lease: Arc::clone(self), host });
+            return Ok(Use {
+                lease: Arc::clone(self),
+                host,
+            });
         }
         let deadline = Instant::now() + self.wait;
         loop {
             match WriterLock::try_acquire(&self.root).map_err(LeaseError::Open)? {
                 Attempt::Acquired(lock) => {
-                    let host = Arc::new(LocalHost::open(&self.root, &self.config).await.map_err(LeaseError::Open)?);
-                    state.held = Some(Held { host: Arc::clone(&host), _lock: lock });
+                    let host = Arc::new(
+                        LocalHost::open(&self.root, &self.config)
+                            .await
+                            .map_err(LeaseError::Open)?,
+                    );
+                    state.held = Some(Held {
+                        host: Arc::clone(&host),
+                        _lock: lock,
+                    });
                     state.users = 1;
                     state.epoch += 1;
-                    return Ok(Use { lease: Arc::clone(self), host });
+                    return Ok(Use {
+                        lease: Arc::clone(self),
+                        host,
+                    });
                 }
-                Attempt::Held(holder) if Instant::now() >= deadline => return Err(LeaseError::Busy(holder)),
+                Attempt::Held(holder) if Instant::now() >= deadline => {
+                    return Err(LeaseError::Busy(holder))
+                }
                 Attempt::Held(_) => tokio::time::sleep(Duration::from_millis(50)).await,
             }
         }
@@ -196,45 +226,83 @@ mod tests {
     #[tokio::test]
     async fn the_root_is_not_loaded_until_a_call_needs_it_and_is_given_back_when_idle() {
         let root = tempfile::tempdir().unwrap();
-        let lease = lease(root.path(), Duration::from_secs(1), Duration::from_millis(100));
+        let lease = lease(
+            root.path(),
+            Duration::from_secs(1),
+            Duration::from_millis(100),
+        );
         assert!(!lease.is_held().await);
         let turn = lease.acquire().await.unwrap();
         assert!(lease.is_held().await);
         // Another process cannot take it while this one holds it.
-        assert!(matches!(WriterLock::try_acquire(root.path()).unwrap(), Attempt::Held(_)));
+        assert!(matches!(
+            WriterLock::try_acquire(root.path()).unwrap(),
+            Attempt::Held(_)
+        ));
         drop(turn);
         tokio::time::sleep(Duration::from_millis(400)).await;
-        assert!(!lease.is_held().await, "idle for longer than the idle time: the root is given back");
-        assert!(matches!(WriterLock::try_acquire(root.path()).unwrap(), Attempt::Acquired(_)));
+        assert!(
+            !lease.is_held().await,
+            "idle for longer than the idle time: the root is given back"
+        );
+        assert!(matches!(
+            WriterLock::try_acquire(root.path()).unwrap(),
+            Attempt::Acquired(_)
+        ));
     }
 
     #[tokio::test]
     async fn calls_close_together_share_one_load_and_the_idle_clock_restarts() {
         let root = tempfile::tempdir().unwrap();
-        let lease = lease(root.path(), Duration::from_secs(1), Duration::from_millis(300));
+        let lease = lease(
+            root.path(),
+            Duration::from_secs(1),
+            Duration::from_millis(300),
+        );
         let first = lease.acquire().await.unwrap();
         let host = Arc::as_ptr(first.host());
         drop(first);
         tokio::time::sleep(Duration::from_millis(150)).await;
         let second = lease.acquire().await.unwrap();
-        assert_eq!(Arc::as_ptr(second.host()), host, "within the idle time the loaded root is reused");
+        assert_eq!(
+            Arc::as_ptr(second.host()),
+            host,
+            "within the idle time the loaded root is reused"
+        );
         drop(second);
         tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(lease.is_held().await, "the idle time counts from the last call, not the first");
+        assert!(
+            lease.is_held().await,
+            "the idle time counts from the last call, not the first"
+        );
     }
 
     #[tokio::test]
     async fn two_processes_take_turns_and_the_second_waits_for_the_first_to_go_idle() {
         let root = tempfile::tempdir().unwrap();
         let (a, b) = (
-            lease(root.path(), Duration::from_secs(5), Duration::from_millis(100)),
-            lease(root.path(), Duration::from_secs(5), Duration::from_millis(100)),
+            lease(
+                root.path(),
+                Duration::from_secs(5),
+                Duration::from_millis(100),
+            ),
+            lease(
+                root.path(),
+                Duration::from_secs(5),
+                Duration::from_millis(100),
+            ),
         );
         let first = a.acquire().await.unwrap();
         drop(first);
         let started = Instant::now();
-        let second = b.acquire().await.expect("the second gets its turn once the first is idle");
-        assert!(started.elapsed() >= Duration::from_millis(50), "it had to wait for the first to let go");
+        let second = b
+            .acquire()
+            .await
+            .expect("the second gets its turn once the first is idle");
+        assert!(
+            started.elapsed() >= Duration::from_millis(50),
+            "it had to wait for the first to let go"
+        );
         assert!(b.is_held().await && !a.is_held().await);
         drop(second);
     }
@@ -242,15 +310,27 @@ mod tests {
     #[tokio::test]
     async fn a_process_that_never_gets_its_turn_is_told_who_has_the_root_and_never_loads_it() {
         let root = tempfile::tempdir().unwrap();
-        let a = lease(root.path(), Duration::from_secs(5), Duration::from_millis(100));
-        let b = lease(root.path(), Duration::from_millis(300), Duration::from_millis(100));
+        let a = lease(
+            root.path(),
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+        );
+        let b = lease(
+            root.path(),
+            Duration::from_millis(300),
+            Duration::from_millis(100),
+        );
         let busy = a.acquire().await.unwrap(); // held for the whole test
         let error = match b.acquire().await {
             Err(error) => error,
             Ok(_) => panic!("the second must not get a turn while the first holds the root"),
         };
         let message = error.message();
-        assert!(message.starts_with("data_root_busy:") && message.contains(&std::process::id().to_string()), "{message}");
+        assert!(
+            message.starts_with("data_root_busy:")
+                && message.contains(&std::process::id().to_string()),
+            "{message}"
+        );
         assert!(message.contains("Nothing was changed"));
         assert!(!b.is_held().await);
         drop(busy);
@@ -262,9 +342,17 @@ mod tests {
         let file = dir.path().join("not-a-directory");
         std::fs::write(&file, b"x").unwrap();
         let lease = lease(&file, Duration::from_millis(200), Duration::from_millis(50));
-        let error = lease.acquire().await.err().expect("a file where the root should be cannot be opened");
+        let error = lease
+            .acquire()
+            .await
+            .err()
+            .expect("a file where the root should be cannot be opened");
         assert!(matches!(error, LeaseError::Open(_)), "{error:?}");
-        assert!(error.message().contains("not-a-directory"), "{}", error.message());
+        assert!(
+            error.message().contains("not-a-directory"),
+            "{}",
+            error.message()
+        );
         assert!(!lease.is_held().await);
     }
 }

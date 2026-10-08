@@ -27,7 +27,12 @@ impl ProvisionedExecutor {
     /// read except under its mounts: the data root, and the home directory.
     #[must_use]
     pub fn new(toolchains: Toolchains, spec: Spec, private_roots: Vec<PathBuf>) -> Self {
-        Self { toolchains, spec, private_roots, checked: OnceCell::new() }
+        Self {
+            toolchains,
+            spec,
+            private_roots,
+            checked: OnceCell::new(),
+        }
     }
 
     async fn executor(&self) -> Result<&LocalExecutor, String> {

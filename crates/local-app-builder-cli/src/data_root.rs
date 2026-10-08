@@ -49,13 +49,18 @@ pub fn resolve_data_root(flag: Option<&str>, env: &Env) -> Result<DataRoot, Stri
         (default_root(env)?, DataRootSource::Default)
     };
     if !raw.is_absolute() {
-        return Err(format!("the data root must be an absolute path, got `{}`", raw.display()));
+        return Err(format!(
+            "the data root must be an absolute path, got `{}`",
+            raw.display()
+        ));
     }
     Ok(DataRoot { path: raw, source })
 }
 
 fn default_root(env: &Env) -> Result<PathBuf, String> {
-    let home = env.var("HOME").ok_or("HOME is not set, so there is no default data root; pass --data-root")?;
+    let home = env
+        .var("HOME")
+        .ok_or("HOME is not set, so there is no default data root; pass --data-root")?;
     if cfg!(target_os = "macos") {
         Ok(PathBuf::from(home).join("Library/Application Support/local-app-builder"))
     } else if let Some(xdg) = env.var("XDG_DATA_HOME") {
@@ -70,16 +75,28 @@ mod tests {
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> Env {
-        Env::new(pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())), vec![])
+        Env::new(
+            pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())),
+            vec![],
+        )
     }
 
     #[test]
     fn the_flag_beats_the_variable_beats_the_default() {
-        let e = env(&[("HOME", "/home/a"), ("LOCAL_APP_BUILDER_DATA_ROOT", "/var/x")]);
+        let e = env(&[
+            ("HOME", "/home/a"),
+            ("LOCAL_APP_BUILDER_DATA_ROOT", "/var/x"),
+        ]);
         let r = resolve_data_root(Some("/tmp/flag"), &e).unwrap();
-        assert_eq!((r.path, r.source), ("/tmp/flag".into(), DataRootSource::Flag));
+        assert_eq!(
+            (r.path, r.source),
+            ("/tmp/flag".into(), DataRootSource::Flag)
+        );
         let r = resolve_data_root(None, &e).unwrap();
-        assert_eq!((r.path, r.source), ("/var/x".into(), DataRootSource::Variable));
+        assert_eq!(
+            (r.path, r.source),
+            ("/var/x".into(), DataRootSource::Variable)
+        );
         let r = resolve_data_root(None, &env(&[("HOME", "/home/a")])).unwrap();
         assert_eq!(r.source, DataRootSource::Default);
         assert!(r.path.starts_with("/home/a"));
@@ -88,18 +105,26 @@ mod tests {
 
     #[test]
     fn an_empty_variable_is_unset() {
-        let r = resolve_data_root(None, &env(&[("HOME", "/h"), ("LOCAL_APP_BUILDER_DATA_ROOT", "")])).unwrap();
+        let r = resolve_data_root(
+            None,
+            &env(&[("HOME", "/h"), ("LOCAL_APP_BUILDER_DATA_ROOT", "")]),
+        )
+        .unwrap();
         assert_eq!(r.source, DataRootSource::Default);
     }
 
     #[test]
     fn a_relative_root_is_refused() {
-        assert!(resolve_data_root(Some("data"), &env(&[])).unwrap_err().contains("absolute"));
+        assert!(resolve_data_root(Some("data"), &env(&[]))
+            .unwrap_err()
+            .contains("absolute"));
         assert!(resolve_data_root(None, &env(&[("LOCAL_APP_BUILDER_DATA_ROOT", "rel")])).is_err());
     }
 
     #[test]
     fn no_home_and_no_override_is_an_error_that_names_the_way_out() {
-        assert!(resolve_data_root(None, &env(&[])).unwrap_err().contains("--data-root"));
+        assert!(resolve_data_root(None, &env(&[]))
+            .unwrap_err()
+            .contains("--data-root"));
     }
 }

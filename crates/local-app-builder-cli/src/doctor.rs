@@ -5,8 +5,8 @@
 //! looked at, because a build never uses them (see `local_app_builder_host::Toolchains`).
 
 use crate::{DataRoot, Env};
-use std::fmt::Write as _;
 use local_app_builder_host::{Platform, Spec, Status, Toolchains};
+use std::fmt::Write as _;
 use std::path::Path;
 
 /// How one check came out.
@@ -136,11 +136,26 @@ fn check_toolchain(root: &DataRoot, spec: Result<Spec, String>) -> Check {
     let id = "toolchain";
     let spec = match spec {
         Ok(spec) => spec,
-        Err(reason) => return Check { id, status: CheckStatus::Warn, detail: reason },
+        Err(reason) => {
+            return Check {
+                id,
+                status: CheckStatus::Warn,
+                detail: reason,
+            }
+        }
     };
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime,
-        Err(error) => return Check { id, status: CheckStatus::Warn, detail: format!("cannot check: {error}") },
+        Err(error) => {
+            return Check {
+                id,
+                status: CheckStatus::Warn,
+                detail: format!("cannot check: {error}"),
+            }
+        }
     };
     let toolchains = Toolchains::in_data_root(&root.path);
     let (status, detail) = match runtime.block_on(toolchains.status(&spec)) {
@@ -161,17 +176,31 @@ fn check_data_root(root: &DataRoot) -> Check {
     let shown = root.path.display();
     let source = root.source.label();
     let (status, detail) = match std::fs::metadata(&root.path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            (CheckStatus::Ok, format!("{shown} ({source}) does not exist yet; it is created on first use"))
-        }
-        Err(e) => (CheckStatus::Fail, format!("{shown} ({source}) cannot be read: {e}")),
-        Ok(m) if !m.is_dir() => (CheckStatus::Fail, format!("{shown} ({source}) is not a directory")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            CheckStatus::Ok,
+            format!("{shown} ({source}) does not exist yet; it is created on first use"),
+        ),
+        Err(e) => (
+            CheckStatus::Fail,
+            format!("{shown} ({source}) cannot be read: {e}"),
+        ),
+        Ok(m) if !m.is_dir() => (
+            CheckStatus::Fail,
+            format!("{shown} ({source}) is not a directory"),
+        ),
         Ok(_) => match probe_writable(&root.path) {
             Ok(()) => (CheckStatus::Ok, format!("{shown} ({source}) is writable")),
-            Err(e) => (CheckStatus::Fail, format!("{shown} ({source}) is not writable: {e}")),
+            Err(e) => (
+                CheckStatus::Fail,
+                format!("{shown} ({source}) is not writable: {e}"),
+            ),
         },
     };
-    Check { id: "data-root", status, detail }
+    Check {
+        id: "data-root",
+        status,
+        detail,
+    }
 }
 
 /// Create and remove one file. The name carries the process id so two `doctor` runs do not trip each other.
@@ -187,7 +216,10 @@ mod tests {
     use crate::DataRootSource;
 
     fn root(path: &Path) -> DataRoot {
-        DataRoot { path: path.to_path_buf(), source: DataRootSource::Flag }
+        DataRoot {
+            path: path.to_path_buf(),
+            source: DataRootSource::Flag,
+        }
     }
 
     fn find<'a>(r: &'a Report, id: &str) -> &'a Check {
@@ -242,12 +274,25 @@ mod tests {
     #[test]
     fn a_missing_toolchain_is_a_warning_that_says_how_to_get_it_and_creates_nothing() {
         let data = tempfile::tempdir().unwrap();
-        let r = run_doctor_with(&root(data.path()), &Env::default(), Ok(Spec::pinned(Platform::DarwinArm64)));
+        let r = run_doctor_with(
+            &root(data.path()),
+            &Env::default(),
+            Ok(Spec::pinned(Platform::DarwinArm64)),
+        );
         let check = find(&r, "toolchain");
         assert_eq!(check.status, CheckStatus::Warn);
-        assert!(check.detail.contains("pnpm@12.5.1/node@26.9.0") && check.detail.contains("local-app-builder toolchain install"), "{}", check.detail);
+        assert!(
+            check.detail.contains("pnpm@12.5.1/node@26.9.0")
+                && check.detail.contains("local-app-builder toolchain install"),
+            "{}",
+            check.detail
+        );
         assert!(!r.has_failure());
-        assert_eq!(std::fs::read_dir(data.path()).unwrap().count(), 0, "doctor must not create anything");
+        assert_eq!(
+            std::fs::read_dir(data.path()).unwrap().count(),
+            0,
+            "doctor must not create anything"
+        );
     }
 
     #[test]
@@ -256,11 +301,19 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
         for tool in ["node", "pnpm"] {
             std::fs::write(bin.path().join(tool), "#!/bin/sh\n").unwrap();
-            std::fs::set_permissions(bin.path().join(tool), std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(
+                bin.path().join(tool),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
         }
         let env = Env::new([], vec![bin.path().to_path_buf()]);
         let data = tempfile::tempdir().unwrap();
-        let r = run_doctor_with(&root(data.path()), &env, Ok(Spec::pinned(Platform::DarwinArm64)));
+        let r = run_doctor_with(
+            &root(data.path()),
+            &env,
+            Ok(Spec::pinned(Platform::DarwinArm64)),
+        );
         assert_eq!(find(&r, "toolchain").status, CheckStatus::Warn);
         assert!(r.checks.iter().all(|c| !c.id.starts_with("tool.")));
     }
@@ -268,7 +321,11 @@ mod tests {
     #[test]
     fn a_machine_without_pins_says_so_in_the_toolchain_check() {
         let data = tempfile::tempdir().unwrap();
-        let r = run_doctor_with(&root(data.path()), &Env::default(), Err("no pinned toolchain for linux-x86_64".into()));
+        let r = run_doctor_with(
+            &root(data.path()),
+            &Env::default(),
+            Err("no pinned toolchain for linux-x86_64".into()),
+        );
         assert_eq!(find(&r, "toolchain").status, CheckStatus::Warn);
         assert!(find(&r, "toolchain").detail.contains("no pinned toolchain"));
     }
@@ -276,7 +333,11 @@ mod tests {
     #[test]
     fn json_escapes_and_reports_the_overall_verdict() {
         let r = Report {
-            checks: vec![Check { id: "x", status: CheckStatus::Fail, detail: "a \"b\"\n\\".into() }],
+            checks: vec![Check {
+                id: "x",
+                status: CheckStatus::Fail,
+                detail: "a \"b\"\n\\".into(),
+            }],
         };
         assert_eq!(
             r.to_json(),

@@ -166,7 +166,10 @@ mod tests {
         let scope = ConversationExport::new("abc--1", "0".repeat(64)).unwrap();
         assert_eq!(scope.server_name(), "local_app_abc--1");
         assert_eq!(scope.server_info_name(), "lingxi-local-app");
-        assert_eq!(scope.registry_key(), "local_apps:conversation-export:abc--1");
+        assert_eq!(
+            scope.registry_key(),
+            "local_apps:conversation-export:abc--1"
+        );
         assert_eq!(
             scope.tool_full_name("read_value").unwrap(),
             "mcp__local_app_abc--1__read_value"

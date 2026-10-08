@@ -1360,7 +1360,9 @@ impl LocalAppsHostBroker {
         };
         let build_mount = Mount {
             host_path: workspace.clone(),
-            guest_path: local_app_builder_contracts::guest_paths::local_app_build_project(app_id, "store"),
+            guest_path: local_app_builder_contracts::guest_paths::local_app_build_project(
+                app_id, "store",
+            ),
             read_only: false,
             kind: MountKind::Project,
         };
@@ -1372,7 +1374,8 @@ impl LocalAppsHostBroker {
         }
         let store_mount = Mount {
             host_path: dependency_store,
-            guest_path: local_app_builder_contracts::guest_paths::LOCAL_APP_DEPENDENCY_STORE.to_string(),
+            guest_path: local_app_builder_contracts::guest_paths::LOCAL_APP_DEPENDENCY_STORE
+                .to_string(),
             read_only: false,
             kind: MountKind::DependencyStore,
         };

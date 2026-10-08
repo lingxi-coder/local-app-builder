@@ -9914,7 +9914,10 @@ fn locked_platform_packages() -> (std::collections::BTreeSet<(String, String)>, 
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                if !matches!(path.file_name().and_then(|n| n.to_str()), Some("node_modules" | "target")) {
+                if !matches!(
+                    path.file_name().and_then(|n| n.to_str()),
+                    Some("node_modules" | "target")
+                ) {
                     lockfiles(&path, found);
                 }
             } else if path.file_name().is_some_and(|n| n == "pnpm-lock.yaml") {
@@ -9923,7 +9926,10 @@ fn locked_platform_packages() -> (std::collections::BTreeSet<(String, String)>, 
         }
     }
     let mut files = Vec::new();
-    lockfiles(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."), &mut files);
+    lockfiles(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join(".."),
+        &mut files,
+    );
     let mut platform = std::collections::BTreeSet::new();
     for file in &files {
         let text = fs::read_to_string(file).unwrap();
@@ -9934,9 +9940,18 @@ fn locked_platform_packages() -> (std::collections::BTreeSet<(String, String)>, 
                 in_packages = line == "packages:";
                 key = None;
             } else if in_packages && line.starts_with("  ") && !line.starts_with("   ") {
-                key = Some(line.trim().trim_end_matches(':').trim_matches('\'').to_string());
-            } else if in_packages && (line.trim() == "os: [darwin]" || line.trim() == "libc: [musl]") {
-                let key = key.as_deref().expect("a platform field belongs to a package");
+                key = Some(
+                    line.trim()
+                        .trim_end_matches(':')
+                        .trim_matches('\'')
+                        .to_string(),
+                );
+            } else if in_packages
+                && (line.trim() == "os: [darwin]" || line.trim() == "libc: [musl]")
+            {
+                let key = key
+                    .as_deref()
+                    .expect("a platform field belongs to a package");
                 let (name, version) = key.rsplit_once('@').expect("name@version");
                 if !name.starts_with("@pnpm/exe.") {
                     platform.insert((name.to_string(), version.to_string()));
@@ -9950,7 +9965,10 @@ fn locked_platform_packages() -> (std::collections::BTreeSet<(String, String)>, 
 #[test]
 fn trusted_native_bindings_are_exactly_the_platform_packages_the_template_lockfiles_pin() {
     let (locked, lockfile_count) = locked_platform_packages();
-    assert!(lockfile_count >= 16, "the lockfile walk found only {lockfile_count}; the check would be vacuous");
+    assert!(
+        lockfile_count >= 16,
+        "the lockfile walk found only {lockfile_count}; the check would be vacuous"
+    );
     let trusted: std::collections::BTreeSet<(String, String)> = TRUSTED_TOOLCHAIN_NATIVE_BINDINGS
         .iter()
         .map(|(package, version, _)| ((*package).to_string(), (*version).to_string()))

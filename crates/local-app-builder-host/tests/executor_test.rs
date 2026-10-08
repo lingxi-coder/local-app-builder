@@ -47,7 +47,14 @@ fn world() -> World {
     std::os::unix::fs::symlink("/usr/bin/perl", toolchain.join("bin/perl")).unwrap();
     let mut config = LocalExecutorConfig::new(toolchain, vec![data.clone()]);
     config.sample_interval = Duration::from_millis(50);
-    World { _dir: dir, data, project, store, other, executor: LocalExecutor::new(config) }
+    World {
+        _dir: dir,
+        data,
+        project,
+        store,
+        other,
+        executor: LocalExecutor::new(config),
+    }
 }
 
 fn command(program: &str, args: &[&str]) -> IsolatedCommand {
@@ -66,8 +73,18 @@ fn command(program: &str, args: &[&str]) -> IsolatedCommand {
 impl World {
     fn mounted(&self, mut command: IsolatedCommand) -> IsolatedCommand {
         command.mounts = vec![
-            Mount { host_path: self.project.clone(), guest_path: PROJECT.into(), read_only: false, kind: MountKind::Project },
-            Mount { host_path: self.store.clone(), guest_path: STORE.into(), read_only: true, kind: MountKind::DependencyStore },
+            Mount {
+                host_path: self.project.clone(),
+                guest_path: PROJECT.into(),
+                read_only: false,
+                kind: MountKind::Project,
+            },
+            Mount {
+                host_path: self.store.clone(),
+                guest_path: STORE.into(),
+                read_only: true,
+                kind: MountKind::DependencyStore,
+            },
         ];
         command
     }
@@ -76,12 +93,18 @@ impl World {
     async fn sh(&self, code: &str, rest: &[&str]) -> CommandOutcome {
         let mut args = vec![code];
         args.extend_from_slice(rest);
-        self.executor.run(self.mounted(command("node", &args))).await.expect("the command ran")
+        self.executor
+            .run(self.mounted(command("node", &args)))
+            .await
+            .expect("the command ran")
     }
 }
 
 fn alive(pid: &str) -> bool {
-    std::process::Command::new("/bin/kill").args(["-0", pid.trim()]).output().is_ok_and(|o| o.status.success())
+    std::process::Command::new("/bin/kill")
+        .args(["-0", pid.trim()])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 fn wait_for(path: &Path) -> String {
@@ -93,7 +116,11 @@ fn wait_for(path: &Path) -> String {
                 return text;
             }
         }
-        assert!(Instant::now() < deadline, "{} never appeared", path.display());
+        assert!(
+            Instant::now() < deadline,
+            "{} never appeared",
+            path.display()
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -101,8 +128,15 @@ fn wait_for(path: &Path) -> String {
 #[tokio::test]
 async fn guest_paths_in_the_program_arguments_and_environment_mean_host_paths() {
     let w = world();
-    let mut cmd = w.mounted(command("node", &["pwd; echo \"$2\"; echo \"$HOME\"; cat input.txt", &format!("--store-dir={STORE}")]));
-    cmd.env.insert("HOME".into(), format!("{PROJECT}/.state/home"));
+    let mut cmd = w.mounted(command(
+        "node",
+        &[
+            "pwd; echo \"$2\"; echo \"$HOME\"; cat input.txt",
+            &format!("--store-dir={STORE}"),
+        ],
+    ));
+    cmd.env
+        .insert("HOME".into(), format!("{PROJECT}/.state/home"));
     let outcome = w.executor.run(cmd).await.unwrap();
     assert_eq!(outcome.exit_code, 0, "{outcome:?}");
     let lines: Vec<&str> = outcome.stdout.lines().collect();
@@ -117,7 +151,12 @@ async fn guest_paths_in_the_program_arguments_and_environment_mean_host_paths() 
 async fn the_command_sees_only_the_environment_it_was_given() {
     let w = world();
     std::env::set_var("LOCAL_APP_HOST_TEST_LEAK", "leaked");
-    let outcome = w.sh("echo \"[${LOCAL_APP_HOST_TEST_LEAK:-unset}] [${PATH}]\"", &[]).await;
+    let outcome = w
+        .sh(
+            "echo \"[${LOCAL_APP_HOST_TEST_LEAK:-unset}] [${PATH}]\"",
+            &[],
+        )
+        .await;
     assert_eq!(outcome.exit_code, 0, "{outcome:?}");
     let line = outcome.stdout.trim();
     assert!(line.starts_with("[unset] ["), "{line}");
@@ -130,23 +169,47 @@ async fn the_command_sees_only_the_environment_it_was_given() {
 async fn a_nonzero_exit_is_an_outcome_not_an_error() {
     let w = world();
     let outcome = w.sh("echo out; echo err >&2; exit 3", &[]).await;
-    assert_eq!((outcome.exit_code, outcome.stdout.trim(), outcome.stderr.trim()), (3, "out", "err"));
+    assert_eq!(
+        (
+            outcome.exit_code,
+            outcome.stdout.trim(),
+            outcome.stderr.trim()
+        ),
+        (3, "out", "err")
+    );
     assert!(outcome.enforcement.network_policy_enforced);
-    assert!(!outcome.enforcement.memory_limit_enforced, "no memory limit was asked for");
+    assert!(
+        !outcome.enforcement.memory_limit_enforced,
+        "no memory limit was asked for"
+    );
 }
 
 #[tokio::test]
 async fn a_command_cannot_write_outside_its_project() {
     let w = world();
-    let outside = std::env::temp_dir().join(format!("local-app-host-escape-{}", std::process::id()));
+    let outside =
+        std::env::temp_dir().join(format!("local-app-host-escape-{}", std::process::id()));
     let code = format!("echo ok > out.txt; echo bad > '{}/evil.txt'; echo bad > '{}'; echo bad > /etc/local-app-host-evil", w.other.display(), outside.display());
     let outcome = w.sh(&code, &[]).await;
-    assert_ne!(outcome.exit_code, 0, "the last write must have failed: {outcome:?}");
-    assert_eq!(std::fs::read_to_string(w.project.join("out.txt")).unwrap().trim(), "ok", "the project is writable");
+    assert_ne!(
+        outcome.exit_code, 0,
+        "the last write must have failed: {outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(w.project.join("out.txt"))
+            .unwrap()
+            .trim(),
+        "ok",
+        "the project is writable"
+    );
     assert!(!w.other.join("evil.txt").exists(), "wrote into another app");
     assert!(!outside.exists(), "wrote outside the data root");
     assert!(!Path::new("/etc/local-app-host-evil").exists());
-    assert!(outcome.stderr.matches("not permitted").count() >= 3, "{}", outcome.stderr);
+    assert!(
+        outcome.stderr.matches("not permitted").count() >= 3,
+        "{}",
+        outcome.stderr
+    );
 }
 
 #[tokio::test]
@@ -162,12 +225,26 @@ async fn a_command_cannot_read_another_apps_files_or_list_them() {
     let w = world();
     let secret = w.other.join("secret.txt");
     let outcome = w.sh(&format!("cat '{0}' && echo LEAKED; ls '{1}' && echo LISTED; cat input.txt; ls /usr/bin >/dev/null && echo system-ok", secret.display(), w.other.display()), &[]).await;
-    assert!(!outcome.stdout.contains("LEAKED") && !outcome.stdout.contains("other app's data"), "{outcome:?}");
+    assert!(
+        !outcome.stdout.contains("LEAKED") && !outcome.stdout.contains("other app's data"),
+        "{outcome:?}"
+    );
     assert!(!outcome.stdout.contains("LISTED"), "{outcome:?}");
-    assert!(outcome.stdout.contains("project data"), "the project is readable: {outcome:?}");
-    assert!(outcome.stdout.contains("system-ok"), "the system is readable: {outcome:?}");
+    assert!(
+        outcome.stdout.contains("project data"),
+        "the project is readable: {outcome:?}"
+    );
+    assert!(
+        outcome.stdout.contains("system-ok"),
+        "the system is readable: {outcome:?}"
+    );
     // Looking at a path is allowed (programs resolve the real path of their own script); reading it is not.
-    let outcome = w.sh(&format!("test -e '{}' && echo exists", secret.display()), &[]).await;
+    let outcome = w
+        .sh(
+            &format!("test -e '{}' && echo exists", secret.display()),
+            &[],
+        )
+        .await;
     assert!(outcome.stdout.contains("exists"), "{outcome:?}");
 }
 
@@ -186,7 +263,10 @@ async fn the_network_policy_is_enforced_for_each_policy() {
     let disabled = run(NetworkPolicy::Disabled).await;
     assert_eq!(disabled.stdout.trim(), "refused", "{disabled:?}");
     assert!(disabled.enforcement.network_policy_enforced);
-    assert_eq!(run(NetworkPolicy::LoopbackOnly).await.stdout.trim(), "connected");
+    assert_eq!(
+        run(NetworkPolicy::LoopbackOnly).await.stdout.trim(),
+        "connected"
+    );
     assert_eq!(run(NetworkPolicy::Allowed).await.stdout.trim(), "connected");
     drop(listener);
 }
@@ -204,12 +284,18 @@ async fn a_command_that_runs_too_long_is_killed_with_everything_it_started() {
         let started = Instant::now();
         let outcome = w.executor.run(cmd).await.unwrap();
         assert!(outcome.timed_out, "{outcome:?}");
-        assert_eq!(outcome.exit_code, local_app_builder_host::TIMED_OUT_EXIT_CODE);
+        assert_eq!(
+            outcome.exit_code,
+            local_app_builder_host::TIMED_OUT_EXIT_CODE
+        );
         assert!(started.elapsed() < Duration::from_millis(timeout_ms) + Duration::from_secs(10));
         match std::fs::read_to_string(w.project.join("child.pid")) {
             Ok(pid) if !pid.trim().is_empty() => break pid,
             _ => {
-                assert!(timeout_ms < 24_000, "the command was killed before it ever started its child");
+                assert!(
+                    timeout_ms < 24_000,
+                    "the command was killed before it ever started its child"
+                );
                 timeout_ms *= 2;
             }
         }
@@ -224,24 +310,51 @@ async fn a_command_that_exits_leaving_a_child_behind_does_not_leave_it_running()
     // group being killed at exit the run would wait for it and then leave it behind.
     let w = world();
     let started = Instant::now();
-    let outcome = w.sh("sleep 120 & echo $! > child.pid; echo launched", &[]).await;
-    assert_eq!((outcome.exit_code, outcome.stdout.trim()), (0, "launched"), "{outcome:?}");
+    let outcome = w
+        .sh("sleep 120 & echo $! > child.pid; echo launched", &[])
+        .await;
+    assert_eq!(
+        (outcome.exit_code, outcome.stdout.trim()),
+        (0, "launched"),
+        "{outcome:?}"
+    );
     // Waiting for the orphan would take its full 120s; sandbox start-up under load is seconds.
-    assert!(started.elapsed() < Duration::from_secs(60), "the run waited for the orphan: {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "the run waited for the orphan: {:?}",
+        started.elapsed()
+    );
     let pid = std::fs::read_to_string(w.project.join("child.pid")).unwrap();
     std::thread::sleep(Duration::from_millis(200));
-    assert!(!alive(&pid), "the child {pid} outlived the command that started it");
+    assert!(
+        !alive(&pid),
+        "the child {pid} outlived the command that started it"
+    );
 }
 
 #[tokio::test]
 async fn a_command_that_passes_its_memory_limit_is_killed_and_says_why() {
     let w = world();
-    let mut cmd = w.mounted(command("perl", &["-e", "$x = 'a' x (400*1024*1024); sleep 60"]));
-    cmd.limits = ResourceLimits { max_memory_mb: Some(128), ..ResourceLimits::default() };
+    let mut cmd = w.mounted(command(
+        "perl",
+        &["-e", "$x = 'a' x (400*1024*1024); sleep 60"],
+    ));
+    cmd.limits = ResourceLimits {
+        max_memory_mb: Some(128),
+        ..ResourceLimits::default()
+    };
     let started = Instant::now();
     let outcome = w.executor.run(cmd).await.unwrap();
-    assert_eq!(outcome.exit_code, local_app_builder_host::KILLED_EXIT_CODE, "{outcome:?}");
-    assert!(outcome.stderr.contains("resource_limit_exceeded"), "{}", outcome.stderr);
+    assert_eq!(
+        outcome.exit_code,
+        local_app_builder_host::KILLED_EXIT_CODE,
+        "{outcome:?}"
+    );
+    assert!(
+        outcome.stderr.contains("resource_limit_exceeded"),
+        "{}",
+        outcome.stderr
+    );
     assert!(outcome.enforcement.memory_limit_enforced);
     assert!(!outcome.timed_out);
     assert!(started.elapsed() < Duration::from_secs(20));
@@ -250,10 +363,20 @@ async fn a_command_that_passes_its_memory_limit_is_killed_and_says_why() {
 #[tokio::test]
 async fn a_command_under_its_memory_limit_runs_to_the_end_and_is_still_marked_enforced() {
     let w = world();
-    let mut cmd = w.mounted(command("perl", &["-e", "$x = 'a' x (8*1024*1024); print 'done'"]));
-    cmd.limits = ResourceLimits { max_memory_mb: Some(512), ..ResourceLimits::default() };
+    let mut cmd = w.mounted(command(
+        "perl",
+        &["-e", "$x = 'a' x (8*1024*1024); print 'done'"],
+    ));
+    cmd.limits = ResourceLimits {
+        max_memory_mb: Some(512),
+        ..ResourceLimits::default()
+    };
     let outcome = w.executor.run(cmd).await.unwrap();
-    assert_eq!((outcome.exit_code, outcome.stdout.as_str()), (0, "done"), "{outcome:?}");
+    assert_eq!(
+        (outcome.exit_code, outcome.stdout.as_str()),
+        (0, "done"),
+        "{outcome:?}"
+    );
     assert!(outcome.enforcement.memory_limit_enforced);
 }
 
@@ -275,7 +398,10 @@ async fn dropping_the_run_stops_the_command_and_its_children() {
     let _ = task.await;
     let deadline = Instant::now() + Duration::from_secs(30);
     while alive(&pid) {
-        assert!(Instant::now() < deadline, "the child {pid} survived the cancelled run");
+        assert!(
+            Instant::now() < deadline,
+            "the child {pid} survived the cancelled run"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -296,9 +422,14 @@ async fn a_command_that_the_host_cannot_make_safe_is_refused_before_anything_run
 
     let mut other_program = w.mounted(command("node", &[&touch]));
     other_program.command = "/bin/sh".into();
-    assert!(refuse(other_program).await.contains("not one the toolchain provides"));
+    assert!(refuse(other_program)
+        .await
+        .contains("not one the toolchain provides"));
 
-    let unmounted = w.mounted(command("node", &[&touch, "/var/lingxi/local-app-build/other/store/project/x"]));
+    let unmounted = w.mounted(command(
+        "node",
+        &[&touch, "/var/lingxi/local-app-build/other/store/project/x"],
+    ));
     assert!(refuse(unmounted).await.contains("no mount covers"));
 
     let mut elsewhere = w.mounted(command("node", &[&touch]));
@@ -314,10 +445,21 @@ async fn a_command_that_the_host_cannot_make_safe_is_refused_before_anything_run
 #[tokio::test]
 async fn output_beyond_the_cap_keeps_the_end_and_says_what_was_dropped() {
     let w = world();
-    let outcome = w.sh("yes abcdefghijklmnopqrstuvwxyz | head -c 3500000; echo; echo THE-END", &[]).await;
+    let outcome = w
+        .sh(
+            "yes abcdefghijklmnopqrstuvwxyz | head -c 3500000; echo; echo THE-END",
+            &[],
+        )
+        .await;
     assert_eq!(outcome.exit_code, 0);
-    assert!(outcome.stdout.starts_with('['), "{}", &outcome.stdout[..60.min(outcome.stdout.len())]);
-    assert!(outcome.stdout.contains("bytes of earlier output were dropped"));
+    assert!(
+        outcome.stdout.starts_with('['),
+        "{}",
+        &outcome.stdout[..60.min(outcome.stdout.len())]
+    );
+    assert!(outcome
+        .stdout
+        .contains("bytes of earlier output were dropped"));
     assert!(outcome.stdout.trim_end().ends_with("THE-END"));
     assert!(outcome.stdout.len() <= local_app_builder_host::OUTPUT_CAP_BYTES + 100);
     let _ = &w.data;

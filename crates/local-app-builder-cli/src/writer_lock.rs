@@ -63,7 +63,8 @@ impl WriterLock {
     /// # Errors
     /// The root or the lock file could not be created or locked for a reason other than another holder.
     pub fn try_acquire(root: &Path) -> Result<Attempt, String> {
-        std::fs::create_dir_all(root).map_err(|error| format!("create {}: {error}", root.display()))?;
+        std::fs::create_dir_all(root)
+            .map_err(|error| format!("create {}: {error}", root.display()))?;
         let path = root.join(WRITER_LOCK_FILE);
         let mut file = OpenOptions::new()
             .create(true)
@@ -74,8 +75,13 @@ impl WriterLock {
             .map_err(|error| format!("open {}: {error}", path.display()))?;
         match file.try_lock() {
             Ok(()) => {
-                let since = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-                let record = format!("{{\"pid\":{},\"since_unix\":{since}}}\n", std::process::id());
+                let since = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let record = format!(
+                    "{{\"pid\":{},\"since_unix\":{since}}}\n",
+                    std::process::id()
+                );
                 // A failure to write the courtesy record must not cost the lock.
                 let _ = file
                     .set_len(0)
@@ -104,10 +110,21 @@ impl Drop for WriterLock {
 
 fn read_holder(file: &mut File) -> Holder {
     let mut text = String::new();
-    let read = file.seek(SeekFrom::Start(0)).and_then(|_| file.read_to_string(&mut text));
-    let parsed: Option<serde_json::Value> = read.ok().and_then(|_| serde_json::from_str(&text).ok());
-    let field = |name: &str| parsed.as_ref().and_then(|v| v.get(name)).and_then(serde_json::Value::as_u64);
-    Holder { pid: field("pid").and_then(|pid| u32::try_from(pid).ok()), since_unix: field("since_unix") }
+    let read = file
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_to_string(&mut text));
+    let parsed: Option<serde_json::Value> =
+        read.ok().and_then(|_| serde_json::from_str(&text).ok());
+    let field = |name: &str| {
+        parsed
+            .as_ref()
+            .and_then(|v| v.get(name))
+            .and_then(serde_json::Value::as_u64)
+    };
+    Holder {
+        pid: field("pid").and_then(|pid| u32::try_from(pid).ok()),
+        since_unix: field("since_unix"),
+    }
 }
 
 #[cfg(test)]
@@ -130,7 +147,10 @@ mod tests {
             panic!("the lock was taken twice");
         };
         assert_eq!(holder.pid, Some(std::process::id()));
-        assert!(holder.since_unix.is_some_and(|t| t > 1_600_000_000), "{holder:?}");
+        assert!(
+            holder.since_unix.is_some_and(|t| t > 1_600_000_000),
+            "{holder:?}"
+        );
         assert!(holder.describe().contains(&std::process::id().to_string()));
     }
 
@@ -140,7 +160,11 @@ mod tests {
         drop(acquired(root.path()));
         let second = acquired(root.path());
         let text = std::fs::read_to_string(second.path()).unwrap();
-        assert_eq!(text.matches("pid").count(), 1, "the record was appended to, not replaced: {text:?}");
+        assert_eq!(
+            text.matches("pid").count(),
+            1,
+            "the record was appended to, not replaced: {text:?}"
+        );
     }
 
     #[test]
@@ -151,7 +175,13 @@ mod tests {
         let Attempt::Held(holder) = WriterLock::try_acquire(root.path()).unwrap() else {
             panic!("a garbled record must not release the lock");
         };
-        assert_eq!(holder, Holder { pid: None, since_unix: None });
+        assert_eq!(
+            holder,
+            Holder {
+                pid: None,
+                since_unix: None
+            }
+        );
         assert_eq!(holder.describe(), "another process");
     }
 }

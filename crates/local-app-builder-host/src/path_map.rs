@@ -47,7 +47,10 @@ impl PathMap {
                 .map_err(|error| format!("mount {}: {error}", mount.host_path.display()))?;
             let guest = mount.guest_path.trim_end_matches('/').to_string();
             if guest.is_empty() || !guest.starts_with('/') {
-                return Err(format!("mount guest path {:?} is not an absolute path", mount.guest_path));
+                return Err(format!(
+                    "mount guest path {:?} is not an absolute path",
+                    mount.guest_path
+                ));
             }
             if entries.iter().any(|(existing, _)| *existing == guest) {
                 return Err(format!("two mounts claim the guest path {guest}"));
@@ -55,7 +58,10 @@ impl PathMap {
             entries.push((guest, host));
         }
         entries.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
-        Ok(Self { mounts: entries, toolchain: toolchain.clone() })
+        Ok(Self {
+            mounts: entries,
+            toolchain: toolchain.clone(),
+        })
     }
 
     /// The host program a guest program stands for.
@@ -65,8 +71,13 @@ impl PathMap {
     /// run as some other program that happens to share its name.
     pub fn program(&self, guest: &str) -> Result<PathBuf, String> {
         let prefix = format!("{}/", self.toolchain.guest_bin.trim_end_matches('/'));
-        let Some(name) = guest.strip_prefix(&prefix).filter(|n| !n.is_empty() && !n.contains('/')) else {
-            return Err(format!("program {guest} is not one the toolchain provides (programs live in {prefix})"));
+        let Some(name) = guest
+            .strip_prefix(&prefix)
+            .filter(|n| !n.is_empty() && !n.contains('/'))
+        else {
+            return Err(format!(
+                "program {guest} is not one the toolchain provides (programs live in {prefix})"
+            ));
         };
         let host = self.toolchain.host_bin.join(name);
         if !host.is_file() {
@@ -107,7 +118,10 @@ impl PathMap {
     fn mount_at(&self, rest: &str) -> Option<(&str, &Path)> {
         self.mounts.iter().find_map(|(guest, host)| {
             let tail = rest.strip_prefix(guest.as_str())?;
-            tail.chars().next().is_none_or(|next| next == '/' || is_separator(next)).then_some((guest.as_str(), host.as_path()))
+            tail.chars()
+                .next()
+                .is_none_or(|next| next == '/' || is_separator(next))
+                .then_some((guest.as_str(), host.as_path()))
         })
     }
 
@@ -121,12 +135,16 @@ impl PathMap {
         })?;
         let translated = PathBuf::from(self.text(guest));
         if !translated.starts_with(host) {
-            return Err(format!("working directory {guest} resolves outside its mount"));
+            return Err(format!(
+                "working directory {guest} resolves outside its mount"
+            ));
         }
         let real = std::fs::canonicalize(&translated)
             .map_err(|error| format!("working directory {}: {error}", translated.display()))?;
         if !real.starts_with(host) {
-            return Err(format!("working directory {guest} resolves outside its mount through a link"));
+            return Err(format!(
+                "working directory {guest} resolves outside its mount through a link"
+            ));
         }
         Ok(real)
     }
@@ -135,9 +153,12 @@ impl PathMap {
     /// service forgot to declare.
     #[must_use]
     pub fn mentions_guest_root(&self, text: &str) -> Option<&'static str> {
-        [local_app_builder_contracts::guest_paths::LOCAL_APP_BUILD_ROOT, local_app_builder_contracts::guest_paths::LOCAL_APP_DEPENDENCY_STORE]
-            .into_iter()
-            .find(|root| text.contains(root))
+        [
+            local_app_builder_contracts::guest_paths::LOCAL_APP_BUILD_ROOT,
+            local_app_builder_contracts::guest_paths::LOCAL_APP_DEPENDENCY_STORE,
+        ]
+        .into_iter()
+        .find(|root| text.contains(root))
     }
 }
 
@@ -168,11 +189,34 @@ mod tests {
         std::fs::create_dir_all(project.join("sub")).unwrap();
         std::fs::write(bin.join("node"), b"#!/bin/sh\n").unwrap();
         let mounts = [
-            Mount { host_path: project.clone(), guest_path: PROJECT.into(), read_only: false, kind: MountKind::Project },
-            Mount { host_path: store.clone(), guest_path: STORE.into(), read_only: true, kind: MountKind::DependencyStore },
+            Mount {
+                host_path: project.clone(),
+                guest_path: PROJECT.into(),
+                read_only: false,
+                kind: MountKind::Project,
+            },
+            Mount {
+                host_path: store.clone(),
+                guest_path: STORE.into(),
+                read_only: true,
+                kind: MountKind::DependencyStore,
+            },
         ];
-        let map = PathMap::new(&mounts, &Toolchain { guest_bin: "/usr/bin".into(), host_bin: bin.clone() }).unwrap();
-        Fixture { _dir: dir, project, store, bin, map }
+        let map = PathMap::new(
+            &mounts,
+            &Toolchain {
+                guest_bin: "/usr/bin".into(),
+                host_bin: bin.clone(),
+            },
+        )
+        .unwrap();
+        Fixture {
+            _dir: dir,
+            project,
+            store,
+            bin,
+            map,
+        }
     }
 
     #[test]
@@ -180,17 +224,35 @@ mod tests {
         let f = fixture();
         let host = f.project.to_string_lossy().into_owned();
         assert_eq!(f.map.text(PROJECT), host);
-        assert_eq!(f.map.text(&format!("{PROJECT}/node_modules/vite/bin/vite.js")), format!("{host}/node_modules/vite/bin/vite.js"));
-        assert_eq!(f.map.text(&format!("--dir={PROJECT}")), format!("--dir={host}"));
-        assert_eq!(f.map.text(&format!("{STORE}:{PROJECT}/x")), format!("{}:{host}/x", f.store.display()));
-        assert_eq!(f.map.text("--max-old-space-size=3072"), "--max-old-space-size=3072");
+        assert_eq!(
+            f.map
+                .text(&format!("{PROJECT}/node_modules/vite/bin/vite.js")),
+            format!("{host}/node_modules/vite/bin/vite.js")
+        );
+        assert_eq!(
+            f.map.text(&format!("--dir={PROJECT}")),
+            format!("--dir={host}")
+        );
+        assert_eq!(
+            f.map.text(&format!("{STORE}:{PROJECT}/x")),
+            format!("{}:{host}/x", f.store.display())
+        );
+        assert_eq!(
+            f.map.text("--max-old-space-size=3072"),
+            "--max-old-space-size=3072"
+        );
         assert_eq!(f.map.text("vite.config.mjs"), "vite.config.mjs");
     }
 
     #[test]
     fn only_whole_segments_are_rewritten() {
         let f = fixture();
-        for untouched in [format!("{PROJECT}-two"), format!("{PROJECT}x/y"), format!("x{PROJECT}"), "/var/lingxi/local-app-build".to_string()] {
+        for untouched in [
+            format!("{PROJECT}-two"),
+            format!("{PROJECT}x/y"),
+            format!("x{PROJECT}"),
+            "/var/lingxi/local-app-build".to_string(),
+        ] {
             assert_eq!(f.map.text(&untouched), untouched, "{untouched}");
         }
     }
@@ -215,8 +277,15 @@ mod tests {
     fn a_working_directory_must_be_inside_a_mount_and_stay_there() {
         let f = fixture();
         assert_eq!(f.map.directory(PROJECT).unwrap(), f.project);
-        assert_eq!(f.map.directory(&format!("{PROJECT}/sub")).unwrap(), f.project.join("sub"));
-        assert!(f.map.directory("/var/lingxi/elsewhere").unwrap_err().contains("not inside any mount"));
+        assert_eq!(
+            f.map.directory(&format!("{PROJECT}/sub")).unwrap(),
+            f.project.join("sub")
+        );
+        assert!(f
+            .map
+            .directory("/var/lingxi/elsewhere")
+            .unwrap_err()
+            .contains("not inside any mount"));
         assert!(f.map.directory(&format!("{PROJECT}/missing")).is_err());
         // A link that leaves the mount is not a way out of it.
         let outside = f.project.parent().unwrap().join("outside");
@@ -229,23 +298,40 @@ mod tests {
     #[test]
     fn the_guest_roots_are_recognised_so_an_undeclared_mount_is_not_run_blind() {
         let f = fixture();
-        assert!(f.map.mentions_guest_root("/var/lingxi/local-app-build/other/store/project/x").is_some());
+        assert!(f
+            .map
+            .mentions_guest_root("/var/lingxi/local-app-build/other/store/project/x")
+            .is_some());
         assert!(f.map.mentions_guest_root(&f.map.text(PROJECT)).is_none());
     }
 
     #[test]
     fn a_missing_host_directory_or_a_duplicate_guest_path_is_refused_up_front() {
-        let toolchain = Toolchain { guest_bin: "/usr/bin".into(), host_bin: PathBuf::from("/nonexistent") };
+        let toolchain = Toolchain {
+            guest_bin: "/usr/bin".into(),
+            host_bin: PathBuf::from("/nonexistent"),
+        };
         let missing = Mount {
             host_path: PathBuf::from("/definitely/not/here"),
             guest_path: PROJECT.into(),
             read_only: false,
             kind: MountKind::Project,
         };
-        assert!(PathMap::new(&[missing], &toolchain).unwrap_err().contains("/definitely/not/here"));
+        assert!(PathMap::new(&[missing], &toolchain)
+            .unwrap_err()
+            .contains("/definitely/not/here"));
         let dir = tempfile::tempdir().unwrap();
-        let twice = |kind| Mount { host_path: dir.path().to_path_buf(), guest_path: PROJECT.into(), read_only: false, kind };
-        let error = PathMap::new(&[twice(MountKind::Project), twice(MountKind::DependencyStore)], &toolchain).unwrap_err();
+        let twice = |kind| Mount {
+            host_path: dir.path().to_path_buf(),
+            guest_path: PROJECT.into(),
+            read_only: false,
+            kind,
+        };
+        let error = PathMap::new(
+            &[twice(MountKind::Project), twice(MountKind::DependencyStore)],
+            &toolchain,
+        )
+        .unwrap_err();
         assert!(error.contains("two mounts claim"), "{error}");
     }
 }

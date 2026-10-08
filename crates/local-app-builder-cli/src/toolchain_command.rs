@@ -16,9 +16,18 @@ use std::path::PathBuf;
 
 /// Run `toolchain <args…>` for `spec`. Returns the exit code: 0 success (for `status`: the toolchain is ready), 1 a
 /// failure or a toolchain that is not ready, 2 a usage error.
-pub fn run_toolchain(args: &[String], env: &Env, spec: Result<Spec, String>, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+pub fn run_toolchain(
+    args: &[String],
+    env: &Env,
+    spec: Result<Spec, String>,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> u8 {
     let Some((action, rest)) = args.split_first() else {
-        let _ = writeln!(err, "local-app-builder toolchain: expected `status` or `install`");
+        let _ = writeln!(
+            err,
+            "local-app-builder toolchain: expected `status` or `install`"
+        );
         return 2;
     };
     if !matches!(action.as_str(), "status" | "install") {
@@ -33,7 +42,10 @@ pub fn run_toolchain(args: &[String], env: &Env, spec: Result<Spec, String>, out
             ("--data-root", _) => match it.next() {
                 Some(v) => flag_root = Some(v.clone()),
                 None => {
-                    let _ = writeln!(err, "local-app-builder toolchain: --data-root needs a directory");
+                    let _ = writeln!(
+                        err,
+                        "local-app-builder toolchain: --data-root needs a directory"
+                    );
                     return 2;
                 }
             },
@@ -45,7 +57,10 @@ pub fn run_toolchain(args: &[String], env: &Env, spec: Result<Spec, String>, out
                 }
             },
             (other, _) => {
-                let _ = writeln!(err, "local-app-builder toolchain {action}: unknown option `{other}`");
+                let _ = writeln!(
+                    err,
+                    "local-app-builder toolchain {action}: unknown option `{other}`"
+                );
                 return 2;
             }
         }
@@ -64,10 +79,16 @@ pub fn run_toolchain(args: &[String], env: &Env, spec: Result<Spec, String>, out
             return 1;
         }
     };
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = writeln!(err, "local-app-builder toolchain: cannot start the async runtime: {error}");
+            let _ = writeln!(
+                err,
+                "local-app-builder toolchain: cannot start the async runtime: {error}"
+            );
             return 1;
         }
     };
@@ -122,7 +143,14 @@ async fn status(toolchains: &Toolchains, spec: &Spec, out: &mut dyn Write) -> u8
             let _ = writeln!(out, "{headline}");
             let _ = writeln!(out, "  `local-app-builder toolchain install` downloads and verifies it. To install without network access, put these files in a directory and add `--from DIR`:");
             for artifact in [&spec.node, &spec.pnpm] {
-                let _ = writeln!(out, "    {}  ({} bytes, sha256 {})\n      from {}", artifact.file_name(), artifact.size, artifact.sha256, artifact.url);
+                let _ = writeln!(
+                    out,
+                    "    {}  ({} bytes, sha256 {})\n      from {}",
+                    artifact.file_name(),
+                    artifact.size,
+                    artifact.sha256,
+                    artifact.url
+                );
             }
             1
         }

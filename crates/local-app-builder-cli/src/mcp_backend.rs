@@ -18,13 +18,15 @@
 
 use crate::lease::Lease;
 use crate::local_host::{within_call, HostConfig, LocalHost};
-use crate::mcp_protocol::{Approval, ApprovalRequest, CallContext, CallError, ToolBackend, ToolResult, ToolSpec};
+use crate::mcp_protocol::{
+    Approval, ApprovalRequest, CallContext, CallError, ToolBackend, ToolResult, ToolSpec,
+};
 use async_trait::async_trait;
 use local_app_builder_service::mcp_server::LocalAppsMcpTransport;
-use mcp_wire::transport::McpToolResultDto;
 use local_app_builder_service::plan_approval::parse_authoring_block;
 use local_app_builder_service::tool_names::LOCAL_APP_TOOLS;
 use mcp_wire::transport::McpError;
+use mcp_wire::transport::McpToolResultDto;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -173,9 +175,9 @@ impl LocalAppBackend {
             if !(SERVED_READ.contains(operation) && *read_only) && !writes {
                 continue;
             }
-            let definition = catalog
-                .get(*operation)
-                .ok_or_else(|| format!("the service has no catalog entry for operation `{operation}`"))?;
+            let definition = catalog.get(*operation).ok_or_else(|| {
+                format!("the service has no catalog entry for operation `{operation}`")
+            })?;
             let mut input_schema = definition.input_schema.clone();
             if *operation == "prepare" {
                 input_schema["properties"]["plan_path"]["description"] =
@@ -183,7 +185,8 @@ impl LocalAppBackend {
             }
             if *operation == "manage_runtime" {
                 // `open`, `suspend` and `resume` are the LingXi apps' own screen and background-state controls.
-                input_schema["properties"]["action"] = json!({"enum": ["start", "stop", "restart"]});
+                input_schema["properties"]["action"] =
+                    json!({"enum": ["start", "stop", "restart"]});
             }
             if *operation == "confirm_dependency_change" {
                 input_schema["properties"]["changes"] = json!({
@@ -207,7 +210,10 @@ impl LocalAppBackend {
                 description: DESCRIPTIONS
                     .iter()
                     .find(|(op, _)| op == operation)
-                    .map_or_else(|| definition.description.clone(), |(_, text)| (*text).to_string()),
+                    .map_or_else(
+                        || definition.description.clone(),
+                        |(_, text)| (*text).to_string(),
+                    ),
                 input_schema,
                 output_schema: definition.output_schema.clone(),
                 read_only: !writes,
@@ -215,7 +221,11 @@ impl LocalAppBackend {
             offered.insert((*name).to_string(), Offered { operation });
         }
         tools.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(Self { lease, tools, offered })
+        Ok(Self {
+            lease,
+            tools,
+            offered,
+        })
     }
 }
 
@@ -242,23 +252,32 @@ fn convert(outcome: Result<McpToolResultDto, McpError>) -> Result<ToolResult, Ca
 /// The plan file is read once. What the person is shown is that text, in full; what is recorded as approved is that
 /// same text, under its digest, so the service's own check (the file must still hold the approved bytes) refuses
 /// anything written to the file after the person looked.
-async fn prepare_with_approval(host: &LocalHost, arguments: Value, context: &CallContext) -> Result<ToolResult, CallError> {
+async fn prepare_with_approval(
+    host: &LocalHost,
+    arguments: Value,
+    context: &CallContext,
+) -> Result<ToolResult, CallError> {
     let fail = |message: String| Ok(ToolResult::failure(message));
-    let (Some(app_id), Some(plan_path)) =
-        (arguments.get("app_id").and_then(Value::as_str), arguments.get("plan_path").and_then(Value::as_str))
-    else {
+    let (Some(app_id), Some(plan_path)) = (
+        arguments.get("app_id").and_then(Value::as_str),
+        arguments.get("plan_path").and_then(Value::as_str),
+    ) else {
         return fail("app_id and plan_path are required".into());
     };
     let path = PathBuf::from(plan_path);
     if !path.is_absolute() {
-        return fail(format!("plan_path must be an absolute path, got `{plan_path}`"));
+        return fail(format!(
+            "plan_path must be an absolute path, got `{plan_path}`"
+        ));
     }
     let metadata = match std::fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) => return fail(format!("cannot read the plan file {plan_path}: {error}")),
     };
     if !metadata.is_file() {
-        return fail(format!("plan_path must name a regular file, and {plan_path} is not one"));
+        return fail(format!(
+            "plan_path must name a regular file, and {plan_path} is not one"
+        ));
     }
     if metadata.len() > MAX_PLAN_BYTES {
         return fail(format!(
@@ -278,7 +297,10 @@ async fn prepare_with_approval(host: &LocalHost, arguments: Value, context: &Cal
         }
         Err(reason) => return fail(format!("plan_approval_invalid: {reason}")),
     }
-    let digest: String = Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let digest: String = Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let message = format!(
         "Approve this plan for the Local App `{app_id}`?\n\nThe assistant wrote the plan below to {plan_path}. If you approve, \
          the app is built from exactly this text (sha256 {}); if the file changes afterwards, nothing is created.\n\n\
@@ -294,8 +316,15 @@ async fn prepare_with_approval(host: &LocalHost, arguments: Value, context: &Cal
         }
         Approval::Unavailable(why) => return fail(format!("approval_unavailable: {why}")),
     }
-    host.plans.observe(&json!({"plan": text, "filePath": plan_path}).to_string(), &host.session);
-    convert(host.transport.call_host_operation("prepare", arguments).await)
+    host.plans.observe(
+        &json!({"plan": text, "filePath": plan_path}).to_string(),
+        &host.session,
+    );
+    convert(
+        host.transport
+            .call_host_operation("prepare", arguments)
+            .await,
+    )
 }
 
 #[async_trait]
@@ -304,7 +333,12 @@ impl ToolBackend for LocalAppBackend {
         self.tools.clone()
     }
 
-    async fn call(&self, name: &str, arguments: Value, context: &CallContext) -> Result<ToolResult, CallError> {
+    async fn call(
+        &self,
+        name: &str,
+        arguments: Value,
+        context: &CallContext,
+    ) -> Result<ToolResult, CallError> {
         let Some(&Offered { operation }) = self.offered.get(name) else {
             return Err(CallError::UnknownTool(name.to_string()));
         };
@@ -317,7 +351,11 @@ impl ToolBackend for LocalAppBackend {
             if operation == "prepare" {
                 prepare_with_approval(&host, arguments, context).await
             } else {
-                convert(host.transport.call_host_operation(operation, arguments).await)
+                convert(
+                    host.transport
+                        .call_host_operation(operation, arguments)
+                        .await,
+                )
             }
         })
         .await;
@@ -332,17 +370,26 @@ mod tests {
     use crate::mcp_protocol::NoApprover;
 
     fn ctx() -> CallContext {
-        CallContext { approver: Arc::new(NoApprover("no client in this test")) }
+        CallContext {
+            approver: Arc::new(NoApprover("no client in this test")),
+        }
     }
 
     async fn backend() -> (tempfile::TempDir, LocalAppBackend) {
         let root = tempfile::tempdir().expect("tempdir");
-        let backend = LocalAppBackend::open(root.path(), HostConfig::default()).await.expect("open");
+        let backend = LocalAppBackend::open(root.path(), HostConfig::default())
+            .await
+            .expect("open");
         (root, backend)
     }
 
     fn text(result: &ToolResult) -> String {
-        result.content.iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n")
+        result
+            .content
+            .iter()
+            .filter_map(|c| c["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[tokio::test]
@@ -355,7 +402,11 @@ mod tests {
             .filter(|(_, op, ro)| SERVED_WRITE.contains(op) || (SERVED_READ.contains(op) && *ro))
             .map(|(name, _, _)| *name)
             .collect();
-        assert_eq!(expected.len(), SERVED_READ.len() + SERVED_WRITE.len(), "every served operation has a tool row");
+        assert_eq!(
+            expected.len(),
+            SERVED_READ.len() + SERVED_WRITE.len(),
+            "every served operation has a tool row"
+        );
         assert_eq!(offered.len(), expected.len(), "{offered:?}");
         for name in &expected {
             assert!(offered.contains(name), "{name} missing from {offered:?}");
@@ -381,9 +432,24 @@ mod tests {
     async fn nothing_offered_is_worded_for_another_product() {
         let (_root, backend) = backend().await;
         for tool in backend.tools() {
-            let text = format!("{} {} {:?} {:?}", tool.name, tool.description, tool.input_schema, tool.output_schema).to_lowercase();
-            for word in ["lingxi", "global conversation", "workspace contract", "exitplanmode", "plan-mode", "the engine"] {
-                assert!(!text.contains(word), "{} mentions `{word}`: {text}", tool.name);
+            let text = format!(
+                "{} {} {:?} {:?}",
+                tool.name, tool.description, tool.input_schema, tool.output_schema
+            )
+            .to_lowercase();
+            for word in [
+                "lingxi",
+                "global conversation",
+                "workspace contract",
+                "exitplanmode",
+                "plan-mode",
+                "the engine",
+            ] {
+                assert!(
+                    !text.contains(word),
+                    "{} mentions `{word}`: {text}",
+                    tool.name
+                );
             }
         }
     }
@@ -394,55 +460,125 @@ mod tests {
         for tool in backend.tools().into_iter().filter(|t| t.read_only) {
             let required: Vec<String> = tool.input_schema["required"]
                 .as_array()
-                .map(|r| r.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|r| {
+                    r.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            let arguments: serde_json::Map<String, Value> = required.iter().map(|key| (key.clone(), json!("no-such-app"))).collect();
-            let result = backend.call(&tool.name, Value::Object(arguments), &ctx()).await.unwrap_or_else(|e| panic!("{}: {e:?}", tool.name));
-            assert!(!text(&result).contains("unsupported_on_this_host"), "{} is listed but unsupported: {}", tool.name, text(&result));
+            let arguments: serde_json::Map<String, Value> = required
+                .iter()
+                .map(|key| (key.clone(), json!("no-such-app")))
+                .collect();
+            let result = backend
+                .call(&tool.name, Value::Object(arguments), &ctx())
+                .await
+                .unwrap_or_else(|e| panic!("{}: {e:?}", tool.name));
+            assert!(
+                !text(&result).contains("unsupported_on_this_host"),
+                "{} is listed but unsupported: {}",
+                tool.name,
+                text(&result)
+            );
         }
     }
 
     #[tokio::test]
     async fn an_operation_that_needs_a_screen_or_a_runtime_is_not_offered_at_all() {
         let (_root, backend) = backend().await;
-        for name in ["LocalAppInspectUi", "LocalAppCaptureUi", "LocalAppQueryData", "LocalAppScaffold", "LocalAppActOnUi", "create", "list"] {
-            assert_eq!(backend.call(name, json!({"app_id": "any-app"}), &ctx()).await.unwrap_err(), CallError::UnknownTool(name.into()), "{name}");
+        for name in [
+            "LocalAppInspectUi",
+            "LocalAppCaptureUi",
+            "LocalAppQueryData",
+            "LocalAppScaffold",
+            "LocalAppActOnUi",
+            "create",
+            "list",
+        ] {
+            assert_eq!(
+                backend
+                    .call(name, json!({"app_id": "any-app"}), &ctx())
+                    .await
+                    .unwrap_err(),
+                CallError::UnknownTool(name.into()),
+                "{name}"
+            );
         }
     }
 
     #[tokio::test]
     async fn listing_an_empty_store_answers_from_the_service() {
         let (_root, backend) = backend().await;
-        let result = backend.call("LocalAppList", json!({}), &ctx()).await.expect("call");
+        let result = backend
+            .call("LocalAppList", json!({}), &ctx())
+            .await
+            .expect("call");
         assert!(!result.is_error, "{result:?}");
         let structured = result.structured.expect("structured content");
-        assert_eq!((structured["count"].clone(), structured["total"].clone()), (json!(0), json!(0)));
+        assert_eq!(
+            (structured["count"].clone(), structured["total"].clone()),
+            (json!(0), json!(0))
+        );
     }
 
     #[tokio::test]
     async fn reading_an_app_that_does_not_exist_is_a_result_the_model_can_read() {
         let (_root, backend) = backend().await;
-        assert!(backend.call("LocalAppGet", json!({"app_id": "nothing-here"}), &ctx()).await.unwrap().is_error);
-        assert!(backend.call("LocalAppGet", json!({}), &ctx()).await.unwrap().is_error);
+        assert!(
+            backend
+                .call("LocalAppGet", json!({"app_id": "nothing-here"}), &ctx())
+                .await
+                .unwrap()
+                .is_error
+        );
+        assert!(
+            backend
+                .call("LocalAppGet", json!({}), &ctx())
+                .await
+                .unwrap()
+                .is_error
+        );
     }
 
     #[tokio::test]
-    async fn creating_an_app_makes_an_empty_shell_that_the_other_tools_refuse_until_it_is_prepared() {
+    async fn creating_an_app_makes_an_empty_shell_that_the_other_tools_refuse_until_it_is_prepared()
+    {
         let (_root, backend) = backend().await;
-        let created = backend.call("LocalAppCreate", json!({"brief": "Track errands", "name": "Errands"}), &ctx()).await.unwrap();
+        let created = backend
+            .call(
+                "LocalAppCreate",
+                json!({"brief": "Track errands", "name": "Errands"}),
+                &ctx(),
+            )
+            .await
+            .unwrap();
         assert!(!created.is_error, "{}", text(&created));
         let id = created
             .structured
             .as_ref()
-            .and_then(|s| s["app"]["id"].as_str().or_else(|| s["id"].as_str()).or_else(|| s["app_id"].as_str()))
+            .and_then(|s| {
+                s["app"]["id"]
+                    .as_str()
+                    .or_else(|| s["id"].as_str())
+                    .or_else(|| s["app_id"].as_str())
+            })
             .map(String::from)
             .unwrap_or_else(|| panic!("the result carries no app id: {created:?}"));
-        let list = backend.call("LocalAppList", json!({}), &ctx()).await.unwrap();
+        let list = backend
+            .call("LocalAppList", json!({}), &ctx())
+            .await
+            .unwrap();
         assert_eq!(list.structured.unwrap()["total"], 1);
-        let got = backend.call("LocalAppGet", json!({"app_id": id}), &ctx()).await.unwrap();
+        let got = backend
+            .call("LocalAppGet", json!({"app_id": id}), &ctx())
+            .await
+            .unwrap();
         assert!(!got.is_error, "{}", text(&got));
         // A build of a shell is refused by the service, not attempted.
-        let build = backend.call("LocalAppBuild", json!({"app_id": id}), &ctx()).await.unwrap();
+        let build = backend
+            .call("LocalAppBuild", json!({"app_id": id}), &ctx())
+            .await
+            .unwrap();
         assert!(build.is_error, "{}", text(&build));
     }
 
@@ -462,10 +598,16 @@ mod tests {
 
     impl Scripted {
         fn answering(answer: Approval) -> Arc<Self> {
-            Arc::new(Self { answer: Mutex::new(answer), asked: Mutex::default(), during: Mutex::default() })
+            Arc::new(Self {
+                answer: Mutex::new(answer),
+                asked: Mutex::default(),
+                during: Mutex::default(),
+            })
         }
         fn context(self: &Arc<Self>) -> CallContext {
-            CallContext { approver: Arc::clone(self) as Arc<dyn Approver> }
+            CallContext {
+                approver: Arc::clone(self) as Arc<dyn Approver>,
+            }
         }
         fn times_asked(&self) -> usize {
             self.asked.lock().unwrap().len()
@@ -493,11 +635,21 @@ mod tests {
     }
 
     /// A backend with one empty app and a plan file for it.
-    async fn with_app_and_plan(text: &str) -> (tempfile::TempDir, LocalAppBackend, String, PathBuf) {
+    async fn with_app_and_plan(
+        text: &str,
+    ) -> (tempfile::TempDir, LocalAppBackend, String, PathBuf) {
         let (root, backend) = backend().await;
-        let created = backend.call("LocalAppCreate", json!({"brief": "Track water"}), &ctx()).await.unwrap();
+        let created = backend
+            .call("LocalAppCreate", json!({"brief": "Track water"}), &ctx())
+            .await
+            .unwrap();
         let s = created.structured.expect("structured");
-        let id = s["app"]["id"].as_str().or_else(|| s["id"].as_str()).or_else(|| s["app_id"].as_str()).expect("app id").to_string();
+        let id = s["app"]["id"]
+            .as_str()
+            .or_else(|| s["id"].as_str())
+            .or_else(|| s["app_id"].as_str())
+            .expect("app id")
+            .to_string();
         let plans = tempfile::tempdir().unwrap();
         let path = plans.path().join("plan.md");
         std::fs::write(&path, text).unwrap();
@@ -505,15 +657,30 @@ mod tests {
         (root, backend, id, path)
     }
 
-    async fn prepare(backend: &LocalAppBackend, id: &str, path: &Path, who: &CallContext) -> ToolResult {
-        backend.call("LocalAppPrepare", json!({"app_id": id, "plan_path": path}), who).await.unwrap()
+    async fn prepare(
+        backend: &LocalAppBackend,
+        id: &str,
+        path: &Path,
+        who: &CallContext,
+    ) -> ToolResult {
+        backend
+            .call(
+                "LocalAppPrepare",
+                json!({"app_id": id, "plan_path": path}),
+                who,
+            )
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn the_person_is_shown_the_whole_plan_and_nothing_is_prepared_without_their_yes() {
         for (label, answer) in [
             ("declined", Approval::Declined),
-            ("unavailable", Approval::Unavailable("the client did not declare support for elicitation".into())),
+            (
+                "unavailable",
+                Approval::Unavailable("the client did not declare support for elicitation".into()),
+            ),
         ] {
             let text_of_plan = plan("react-dom-r4");
             let (_root, backend, id, path) = with_app_and_plan(&text_of_plan).await;
@@ -521,17 +688,32 @@ mod tests {
             let result = prepare(&backend, &id, &path, &person.context()).await;
             assert!(result.is_error, "{label}: {}", text(&result));
             let said = text(&result);
-            assert!(said.starts_with("plan_not_approved:") || said.starts_with("approval_unavailable:"), "{label}: {said}");
+            assert!(
+                said.starts_with("plan_not_approved:") || said.starts_with("approval_unavailable:"),
+                "{label}: {said}"
+            );
             // The question carried the plan itself and the app, and nothing the model could dress up differently.
             let asked = person.asked.lock().unwrap();
             assert_eq!(asked.len(), 1, "{label}");
-            assert!(asked[0].message.contains(&text_of_plan), "{label}: the person must see the plan in full");
+            assert!(
+                asked[0].message.contains(&text_of_plan),
+                "{label}: the person must see the plan in full"
+            );
             assert!(asked[0].message.contains(&format!("`{id}`")), "{label}");
             drop(asked);
             // The refusal left no approval behind: the service itself says no plan was approved.
-            let again = prepare(&backend, &id, &path, &Scripted::answering(Approval::Unavailable("none".into())).context()).await;
+            let again = prepare(
+                &backend,
+                &id,
+                &path,
+                &Scripted::answering(Approval::Unavailable("none".into())).context(),
+            )
+            .await;
             assert!(again.is_error);
-            let got = backend.call("LocalAppGet", json!({"app_id": id}), &ctx()).await.unwrap();
+            let got = backend
+                .call("LocalAppGet", json!({"app_id": id}), &ctx())
+                .await
+                .unwrap();
             assert!(!got.is_error);
         }
     }
@@ -551,8 +733,16 @@ mod tests {
             let (_root, backend, id, path) = with_app_and_plan(&text_of_plan).await;
             let person = Scripted::answering(Approval::Approved);
             let result = prepare(&backend, &id, &path, &person.context()).await;
-            assert!(result.is_error && text(&result).contains(expect), "{label}: {}", text(&result));
-            assert_eq!(person.times_asked(), 0, "{label}: the person must not be asked to approve what cannot be prepared");
+            assert!(
+                result.is_error && text(&result).contains(expect),
+                "{label}: {}",
+                text(&result)
+            );
+            assert_eq!(
+                person.times_asked(),
+                0,
+                "{label}: the person must not be asked to approve what cannot be prepared"
+            );
         }
     }
 
@@ -582,9 +772,15 @@ mod tests {
         let person = Scripted::answering(Approval::Approved);
         // While the person decides, the model rewrites the plan to name another template.
         let rewrite = path.clone();
-        *person.during.lock().unwrap() = Some(Box::new(move || std::fs::write(rewrite, plan("canvas-2d-r4")).unwrap()));
+        *person.during.lock().unwrap() = Some(Box::new(move || {
+            std::fs::write(rewrite, plan("canvas-2d-r4")).unwrap()
+        }));
         let result = prepare(&backend, &id, &path, &person.context()).await;
         assert!(result.is_error, "{}", text(&result));
-        assert!(text(&result).contains("changed after it was approved"), "{}", text(&result));
+        assert!(
+            text(&result).contains("changed after it was approved"),
+            "{}",
+            text(&result)
+        );
     }
 }

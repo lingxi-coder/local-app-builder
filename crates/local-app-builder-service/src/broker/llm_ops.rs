@@ -997,7 +997,8 @@ mod tests {
                             ..
                         } => data.push((seq, data_json)),
                         local_app_builder_contracts::bridge::BridgeStreamFrame::Completed {
-                            seq, ..
+                            seq,
+                            ..
                         } => completed_seq = Some(seq),
                         _ => {}
                     }

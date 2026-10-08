@@ -20,13 +20,15 @@ pub use lease::{Lease, LeaseError, Use, LEASE_IDLE, LEASE_WAIT};
 pub use local_host::{within_call, ApprovalSink, CatalogBundle, HostConfig, LocalHost};
 pub use mcp_backend::{LocalAppBackend, MAX_PLAN_BYTES, SERVED_READ, SERVED_WRITE};
 pub use mcp_protocol::{
-    Approval, ApprovalRequest, Approver, CallContext, CallError, ClientLink, LinkError, NoApprover, Reply, ServerIdentity,
-    Session, ToolBackend, ToolResult, ToolSpec, APPROVAL_TIMEOUT, LEGACY_VERSION, MODERN_VERSION,
-    SUPPORTED_VERSIONS,
+    Approval, ApprovalRequest, Approver, CallContext, CallError, ClientLink, LinkError, NoApprover,
+    Reply, ServerIdentity, Session, ToolBackend, ToolResult, ToolSpec, APPROVAL_TIMEOUT,
+    LEGACY_VERSION, MODERN_VERSION, SUPPORTED_VERSIONS,
 };
 pub use mcp_stdio::{serve, DRAIN_GRACE, MAX_MESSAGE_BYTES};
 pub use toolchain_command::run_toolchain;
-pub use writer_lock::{Attempt as WriterAttempt, Holder as WriterHolder, WriterLock, WRITER_LOCK_FILE};
+pub use writer_lock::{
+    Attempt as WriterAttempt, Holder as WriterHolder, WriterLock, WRITER_LOCK_FILE,
+};
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -55,13 +57,19 @@ impl Env {
     /// An environment built by hand (tests).
     #[must_use]
     pub fn new(vars: impl IntoIterator<Item = (String, String)>, path: Vec<PathBuf>) -> Self {
-        Self { vars: vars.into_iter().collect(), path }
+        Self {
+            vars: vars.into_iter().collect(),
+            path,
+        }
     }
 
     /// One variable, if set and non-empty.
     #[must_use]
     pub fn var(&self, name: &str) -> Option<&str> {
-        self.vars.get(name).map(String::as_str).filter(|v| !v.is_empty())
+        self.vars
+            .get(name)
+            .map(String::as_str)
+            .filter(|v| !v.is_empty())
     }
 
     /// The directories searched for programs.
@@ -119,7 +127,13 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
         }
         "doctor" => doctor_command(rest, env, out, err),
         "mcp" => mcp_command(rest, env, err),
-        "toolchain" => run_toolchain(rest, env, local_app_builder_host::Platform::host().map(local_app_builder_host::Spec::pinned), out, err),
+        "toolchain" => run_toolchain(
+            rest,
+            env,
+            local_app_builder_host::Platform::host().map(local_app_builder_host::Spec::pinned),
+            out,
+            err,
+        ),
         other => {
             let _ = writeln!(err, "local-app-builder: unknown command `{other}`\n");
             let _ = err.write_all(USAGE.as_bytes());
@@ -138,7 +152,10 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
             "--data-root" => match it.next() {
                 Some(v) => flag_root = Some(v.clone()),
                 None => {
-                    let _ = writeln!(err, "local-app-builder doctor: --data-root needs a directory");
+                    let _ = writeln!(
+                        err,
+                        "local-app-builder doctor: --data-root needs a directory"
+                    );
                     return 2;
                 }
             },
@@ -156,7 +173,11 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
         }
     };
     let report = run_doctor(&root, env);
-    let rendered = if json { report.to_json() } else { report.to_text() };
+    let rendered = if json {
+        report.to_json()
+    } else {
+        report.to_text()
+    };
     let _ = out.write_all(rendered.as_bytes());
     u8::from(report.has_failure())
 }
@@ -164,15 +185,17 @@ fn doctor_command(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn
 /// How builds run on this machine: the pinned toolchain under the data root, checked on first use. A machine with no
 /// pinned toolchain (not a Mac) has no executor, and builds say so.
 fn host_config(root: &std::path::Path, env: &Env) -> HostConfig {
-    let executor = local_app_builder_host::Platform::host().ok().map(|platform| {
-        let mut private = vec![root.to_path_buf()];
-        private.extend(env.var("HOME").map(PathBuf::from));
-        Arc::new(local_app_builder_host::ProvisionedExecutor::new(
-            local_app_builder_host::Toolchains::in_data_root(root),
-            local_app_builder_host::Spec::pinned(platform),
-            private,
-        )) as Arc<dyn local_app_builder_service::host::BuildExecutor>
-    });
+    let executor = local_app_builder_host::Platform::host()
+        .ok()
+        .map(|platform| {
+            let mut private = vec![root.to_path_buf()];
+            private.extend(env.var("HOME").map(PathBuf::from));
+            Arc::new(local_app_builder_host::ProvisionedExecutor::new(
+                local_app_builder_host::Toolchains::in_data_root(root),
+                local_app_builder_host::Spec::pinned(platform),
+                private,
+            )) as Arc<dyn local_app_builder_service::host::BuildExecutor>
+        });
     HostConfig { executor }
 }
 
@@ -214,10 +237,16 @@ fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
             return 1;
         }
     };
-    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(runtime) => runtime,
         Err(error) => {
-            let _ = writeln!(err, "local-app-builder mcp: cannot start the async runtime: {error}");
+            let _ = writeln!(
+                err,
+                "local-app-builder mcp: cannot start the async runtime: {error}"
+            );
             return 1;
         }
     };
@@ -229,7 +258,9 @@ fn mcp_command(args: &[String], env: &Env, err: &mut dyn Write) -> u8 {
             instructions: Some(mcp_instructions(&root.path)),
         };
         let session = std::sync::Arc::new(Session::new(std::sync::Arc::new(backend), identity));
-        serve(session, tokio::io::stdin(), tokio::io::stdout()).await.map_err(|error| format!("stdio failed: {error}"))
+        serve(session, tokio::io::stdin(), tokio::io::stdout())
+            .await
+            .map_err(|error| format!("stdio failed: {error}"))
     });
     match result {
         Ok(()) => 0,

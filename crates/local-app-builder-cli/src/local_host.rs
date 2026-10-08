@@ -13,7 +13,9 @@
 
 use crate::mcp_protocol::{Approval, ApprovalRequest, Approver, CallContext};
 use async_trait::async_trait;
-use local_app_builder_contracts::approvals::{AuthorizationDecision, DependencyChangeConfirmationRequest, DependencyChangeKind};
+use local_app_builder_contracts::approvals::{
+    AuthorizationDecision, DependencyChangeConfirmationRequest, DependencyChangeKind,
+};
 use local_app_builder_service::broker::LocalAppsHostBroker;
 use local_app_builder_service::host::{BuildExecutor, HostEvent, HostEventSink};
 use local_app_builder_service::mcp_server::LocalAppsMcpTransport;
@@ -43,13 +45,19 @@ pub struct CatalogBundle {
     sha256: String,
 }
 
-const CATALOG: &[u8] = include_bytes!("../../plugins/lingxi-local-app/assets/templates/catalog.json");
+const CATALOG: &[u8] =
+    include_bytes!("../../plugins/lingxi-local-app/assets/templates/catalog.json");
 
 impl CatalogBundle {
     /// The bundle this build carries.
     #[must_use]
     pub fn new() -> Self {
-        Self { sha256: Sha256::digest(CATALOG).iter().map(|b| format!("{b:02x}")).collect() }
+        Self {
+            sha256: Sha256::digest(CATALOG)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect(),
+        }
     }
 }
 
@@ -73,14 +81,20 @@ impl PluginBundle for CatalogBundle {
 /// of the change: the packages and versions are what the assistant proposed, and nothing else the assistant wrote is
 /// shown, so it cannot dress the question up.
 fn dependency_question(request: &DependencyChangeConfirmationRequest) -> ApprovalRequest {
-    let mut message = format!("Approve changing the dependencies of the Local App `{}`?\n\nProposed changes:\n", request.app_id);
+    let mut message = format!(
+        "Approve changing the dependencies of the Local App `{}`?\n\nProposed changes:\n",
+        request.app_id
+    );
     for change in &request.changes {
         let verb = match change.kind {
             DependencyChangeKind::Add => "add",
             DependencyChangeKind::Update => "update",
             DependencyChangeKind::Remove => "remove",
         };
-        let version = change.version.as_deref().map_or(String::new(), |v| format!("@{v}"));
+        let version = change
+            .version
+            .as_deref()
+            .map_or(String::new(), |v| format!("@{v}"));
         message.push_str(&format!(
             "  - {verb} {}{version} (cache: {}; download: {})\n",
             change.package, change.cache_status, change.download_status
@@ -96,7 +110,10 @@ fn dependency_question(request: &DependencyChangeConfirmationRequest) -> Approva
         if request.native_addons_blocked { "yes" } else { "NO" },
         request.rollback_policy
     ));
-    ApprovalRequest { message, question: "Approve this dependency change".into() }
+    ApprovalRequest {
+        message,
+        question: "Approve this dependency change".into(),
+    }
 }
 
 /// Where the service reports what it needs decided.
@@ -114,28 +131,40 @@ impl ApprovalSink {
 #[async_trait]
 impl HostEventSink for ApprovalSink {
     async fn emit(&self, event: HostEvent) {
-        let Some(broker) = self.broker.get().and_then(Weak::upgrade) else { return };
+        let Some(broker) = self.broker.get().and_then(Weak::upgrade) else {
+            return;
+        };
         // The call this event came from, if it came from one. Captured here, while still inside it.
-        let approver: Option<Arc<dyn Approver>> = CURRENT_CALL.try_with(|call| Arc::clone(&call.approver)).ok();
+        let approver: Option<Arc<dyn Approver>> = CURRENT_CALL
+            .try_with(|call| Arc::clone(&call.approver))
+            .ok();
         match event {
             HostEvent::DependencyChangeConfirmationRequested(request) => {
                 let id = request.request_id.clone();
                 tokio::spawn(async move {
                     let approved = match approver {
-                        Some(approver) => approver.ask(dependency_question(&request)).await == Approval::Approved,
+                        Some(approver) => {
+                            approver.ask(dependency_question(&request)).await == Approval::Approved
+                        }
                         None => false,
                     };
-                    broker.resolve_dependency_change_confirmation(&id, approved).await;
+                    broker
+                        .resolve_dependency_change_confirmation(&id, approved)
+                        .await;
                 });
             }
             HostEvent::McpProposalApprovalRequested(request) => {
                 tokio::spawn(async move {
-                    broker.resolve_mcp_proposal_approval(&request.request_id, false).await;
+                    broker
+                        .resolve_mcp_proposal_approval(&request.request_id, false)
+                        .await;
                 });
             }
             HostEvent::CapabilityRequested(request) => {
                 tokio::spawn(async move {
-                    broker.resolve_capability(&request.request_id, AuthorizationDecision::Deny).await;
+                    broker
+                        .resolve_capability(&request.request_id, AuthorizationDecision::Deny)
+                        .await;
                 });
             }
             // Everything else is told to the host and needs no answer.
@@ -164,7 +193,10 @@ pub struct LocalHost {
 
 /// Installed memory, which sizes the build budget. Zero (the smallest budget) when it cannot be read.
 async fn physical_memory_bytes() -> u64 {
-    let output = tokio::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).output().await;
+    let output = tokio::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .await;
     output
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -191,28 +223,49 @@ impl LocalHost {
         let service = Arc::new(
             AppService::load(root, Arc::new(SystemClock), Arc::new(NoopAppEventObserver))
                 .await
-                .map_err(|error| format!("cannot open the data root {}: {error}", root.display()))?,
+                .map_err(|error| {
+                    format!("cannot open the data root {}: {error}", root.display())
+                })?,
         );
         let attach = |what: &str| format!("{what} was attached twice");
-        broker.attach_service(Arc::clone(&service)).map_err(|_| attach("the service"))?;
-        broker.attach_plugin_bundle(Arc::new(CatalogBundle::new())).map_err(|_| attach("the template catalog"))?;
+        broker
+            .attach_service(Arc::clone(&service))
+            .map_err(|_| attach("the service"))?;
+        broker
+            .attach_plugin_bundle(Arc::new(CatalogBundle::new()))
+            .map_err(|_| attach("the template catalog"))?;
 
         let plans = Arc::new(PlanApprovalLog::default());
         let session = format!(
             "cli-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
         );
         let transport = LocalAppsMcpTransport::new(root.to_path_buf());
-        transport.attach_service(service).map_err(|_| attach("the service"))?;
-        transport.attach_host(broker.clone()).map_err(|_| attach("the host"))?;
-        transport.attach_plan_approval_log(Arc::clone(&plans)).map_err(|_| attach("the plan record"))?;
+        transport
+            .attach_service(service)
+            .map_err(|_| attach("the service"))?;
+        transport
+            .attach_host(broker.clone())
+            .map_err(|_| attach("the host"))?;
+        transport
+            .attach_plan_approval_log(Arc::clone(&plans))
+            .map_err(|_| attach("the plan record"))?;
         let provided = session.clone();
-        transport.attach_session_provider(Arc::new(move || Some(provided.clone()))).map_err(|_| attach("the session"))?;
+        transport
+            .attach_session_provider(Arc::new(move || Some(provided.clone())))
+            .map_err(|_| attach("the session"))?;
         transport
             .attach_plugin_availability(Arc::new(|| Box::pin(async { true })))
             .map_err(|_| attach("the plugin probe"))?;
-        Ok(Self { transport: Arc::new(transport), plans, session, broker })
+        Ok(Self {
+            transport: Arc::new(transport),
+            plans,
+            session,
+            broker,
+        })
     }
 
     /// Whether anything started by this host is still running and needs the data root to stay held.
@@ -259,17 +312,37 @@ mod tests {
     fn the_dependency_question_names_every_package_and_every_protection_that_is_off() {
         let question = dependency_question(&request());
         let message = &question.message;
-        assert!(message.contains("`abc123`") && message.contains("add dayjs@1.11.13") && message.contains("remove zod"), "{message}");
-        assert!(message.contains("Install scripts blocked: yes"), "{message}");
-        assert!(message.contains("Native addons blocked: NO"), "a protection that is off must say so: {message}");
-        assert!(!message.contains("Reason given by the assistant"), "the reason is the host's policy code, not the assistant's words");
+        assert!(
+            message.contains("`abc123`")
+                && message.contains("add dayjs@1.11.13")
+                && message.contains("remove zod"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Install scripts blocked: yes"),
+            "{message}"
+        );
+        assert!(
+            message.contains("Native addons blocked: NO"),
+            "a protection that is off must say so: {message}"
+        );
+        assert!(
+            !message.contains("Reason given by the assistant"),
+            "the reason is the host's policy code, not the assistant's words"
+        );
     }
 
     #[test]
     fn the_bundle_digest_is_the_catalogs_own() {
         let bundle = CatalogBundle::new();
         assert_eq!(bundle.bundle_sha256().len(), 64);
-        assert!(std::str::from_utf8(bundle.catalog_bytes()).unwrap().contains("react-dom-r4"));
-        assert_eq!(bundle.bundle_sha256(), CatalogBundle::new().bundle_sha256(), "stable across loads");
+        assert!(std::str::from_utf8(bundle.catalog_bytes())
+            .unwrap()
+            .contains("react-dom-r4"));
+        assert_eq!(
+            bundle.bundle_sha256(),
+            CatalogBundle::new().bundle_sha256(),
+            "stable across loads"
+        );
     }
 }

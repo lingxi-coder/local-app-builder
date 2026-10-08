@@ -6,7 +6,9 @@ use super::PendingNativeApproval;
 use super::UiResolution;
 use super::APPROVAL_TIMEOUT;
 use crate::host::HostEvent;
-use local_app_builder_contracts::approvals::{AuthorizationDecision, CapabilityKind, CapabilityRequest};
+use local_app_builder_contracts::approvals::{
+    AuthorizationDecision, CapabilityKind, CapabilityRequest,
+};
 use local_app_builder_contracts::events::PluginErrorCode;
 use local_apps::load_manifest;
 use local_apps::load_permissions;

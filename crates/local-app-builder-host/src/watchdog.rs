@@ -36,8 +36,15 @@ pub fn group_rss_kib(ps_output: &str, pgid: u32) -> u64 {
 
 /// The resident memory of group `pgid` right now, in KiB; `None` when `ps` could not be read.
 pub async fn sample(pgid: u32) -> Option<u64> {
-    let output = Command::new("/bin/ps").args(["-A", "-o", "pgid=,rss="]).output().await.ok()?;
-    output.status.success().then(|| group_rss_kib(&String::from_utf8_lossy(&output.stdout), pgid))
+    let output = Command::new("/bin/ps")
+        .args(["-A", "-o", "pgid=,rss="])
+        .output()
+        .await
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| group_rss_kib(&String::from_utf8_lossy(&output.stdout), pgid))
 }
 
 /// Kill every process in group `pgid`. Not finding any is not a failure: the group may already be gone.
@@ -80,9 +87,17 @@ mod tests {
     #[tokio::test]
     async fn this_process_group_has_a_nonzero_resident_size() {
         // `ps` reads the real table: the test process is in some group, and the sum over every group is not zero.
-        let output = Command::new("/bin/ps").args(["-A", "-o", "pgid=,rss="]).output().await.unwrap();
+        let output = Command::new("/bin/ps")
+            .args(["-A", "-o", "pgid=,rss="])
+            .output()
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&output.stdout).into_owned();
-        let first = text.split_whitespace().next().and_then(|v| v.parse::<u32>().ok()).unwrap();
+        let first = text
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap();
         assert!(group_rss_kib(&text, first) > 0);
         assert!(sample(first).await.is_some());
     }

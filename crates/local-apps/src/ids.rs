@@ -16,7 +16,9 @@ pub use local_app_builder_contracts::ids::{
     is_valid_app_id, is_valid_authoring_handle, is_valid_qa_handle, APP_ID_MAX_LEN,
     AUTHORING_HANDLE_PATTERN, QA_HANDLE_PATTERN,
 };
-use local_app_builder_contracts::ids::{AUTHORING_HANDLE_PREFIX, HANDLE_SUFFIX_LEN, QA_HANDLE_PREFIX};
+use local_app_builder_contracts::ids::{
+    AUTHORING_HANDLE_PREFIX, HANDLE_SUFFIX_LEN, QA_HANDLE_PREFIX,
+};
 
 fn random_hex(len: usize) -> String {
     use rand::Rng;

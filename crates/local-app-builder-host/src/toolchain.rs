@@ -130,7 +130,10 @@ impl Spec {
     #[must_use]
     pub fn pinned(platform: Platform) -> Self {
         let node = |sha256: &str, size| Artifact {
-            url: format!("https://nodejs.org/dist/v26.9.0/node-v26.9.0-{}.tar.gz", platform.name()),
+            url: format!(
+                "https://nodejs.org/dist/v26.9.0/node-v26.9.0-{}.tar.gz",
+                platform.name()
+            ),
             sha256: sha256.into(),
             size,
             entry: format!("node-v26.9.0-{}/bin/node", platform.name()),
@@ -149,12 +152,24 @@ impl Spec {
             // and hashed here (P1); the x64 one is pinned from SHASUMS256.txt alone. pnpm's packages were downloaded,
             // hashed here, and their SHA-512 compared with the registry's `dist.integrity`.
             Platform::DarwinArm64 => (
-                node("6f3de7ed853ee283b4bf24b6e426618f1d357401ce5815db1866eb85eb4b05d9", 58_074_543),
-                pnpm("8e187dd097b1f16de500ebd4b9b32391e6b885f7082a110d5f337b0d42458d41", 19_795_171),
+                node(
+                    "6f3de7ed853ee283b4bf24b6e426618f1d357401ce5815db1866eb85eb4b05d9",
+                    58_074_543,
+                ),
+                pnpm(
+                    "8e187dd097b1f16de500ebd4b9b32391e6b885f7082a110d5f337b0d42458d41",
+                    19_795_171,
+                ),
             ),
             Platform::DarwinX64 => (
-                node("06b2e742ed9025dc84adc830243b3f731956eac9c321bccd0ede384209af02a8", 59_474_959),
-                pnpm("3af6f17fa65c0824e3331aca351fdd673bedc24516cf9a6b3a656693261197bf", 21_865_288),
+                node(
+                    "06b2e742ed9025dc84adc830243b3f731956eac9c321bccd0ede384209af02a8",
+                    59_474_959,
+                ),
+                pnpm(
+                    "3af6f17fa65c0824e3331aca351fdd673bedc24516cf9a6b3a656693261197bf",
+                    21_865_288,
+                ),
             ),
         };
         Self {
@@ -288,10 +303,12 @@ pub struct Toolchains {
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 fn sha256_file(path: &Path) -> std::io::Result<String> {
@@ -311,7 +328,9 @@ impl Toolchains {
     /// The toolchains under `<data_root>/toolchains`.
     #[must_use]
     pub fn in_data_root(data_root: &Path) -> Self {
-        Self { root: data_root.join("toolchains") }
+        Self {
+            root: data_root.join("toolchains"),
+        }
     }
 
     /// The directory a toolchain installs into; it holds `bin/node` and `bin/pnpm`.
@@ -345,8 +364,14 @@ impl Toolchains {
     ///
     /// # Errors
     /// See [`ToolchainError`]. On any error nothing partial is left in the toolchain directory.
-    pub async fn install(&self, spec: &Spec, source: &Source, progress: &(dyn Fn(&str) + Sync)) -> Result<Receipt, ToolchainError> {
-        std::fs::create_dir_all(&self.root).map_err(io(format!("create {}", self.root.display())))?;
+    pub async fn install(
+        &self,
+        spec: &Spec,
+        source: &Source,
+        progress: &(dyn Fn(&str) + Sync),
+    ) -> Result<Receipt, ToolchainError> {
+        std::fs::create_dir_all(&self.root)
+            .map_err(io(format!("create {}", self.root.display())))?;
         let _lock = InstallLock::acquire(&self.root, INSTALL_LOCK_TIMEOUT).await?;
         if let Ok(receipt) = self.verify(spec).await {
             progress("already installed and verified");
@@ -354,8 +379,10 @@ impl Toolchains {
         }
 
         let staging = Staging::create(&self.root)?;
-        let node_archive = fetch(&spec.node, source, &staging.path, "node.archive", progress).await?;
-        let pnpm_archive = fetch(&spec.pnpm, source, &staging.path, "pnpm.archive", progress).await?;
+        let node_archive =
+            fetch(&spec.node, source, &staging.path, "node.archive", progress).await?;
+        let pnpm_archive =
+            fetch(&spec.pnpm, source, &staging.path, "pnpm.archive", progress).await?;
 
         let tree = staging.path.join("tree");
         let bin = tree.join("bin");
@@ -368,39 +395,57 @@ impl Toolchains {
         let pnpm_version = program_version(&bin.join("pnpm"), "pnpm", &spec.pnpm_version).await?;
         let receipt = Receipt {
             key: spec.key.clone(),
-            node: ProgramRecord { version: node_version, archive_sha256: spec.node.sha256.clone(), binary_sha256: node_sha },
-            pnpm: ProgramRecord { version: pnpm_version, archive_sha256: spec.pnpm.sha256.clone(), binary_sha256: pnpm_sha },
-            installed_unix: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            node: ProgramRecord {
+                version: node_version,
+                archive_sha256: spec.node.sha256.clone(),
+                binary_sha256: node_sha,
+            },
+            pnpm: ProgramRecord {
+                version: pnpm_version,
+                archive_sha256: spec.pnpm.sha256.clone(),
+                binary_sha256: pnpm_sha,
+            },
+            installed_unix: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
         };
         let body = serde_json::to_vec_pretty(&receipt).map_err(io("encode the receipt"))?;
         std::fs::write(tree.join(RECEIPT_FILE), body).map_err(io("write the receipt"))?;
 
         let target = self.dir(spec);
         if target.exists() {
-            std::fs::remove_dir_all(&target).map_err(io(format!("remove the damaged {}", target.display())))?;
+            std::fs::remove_dir_all(&target)
+                .map_err(io(format!("remove the damaged {}", target.display())))?;
         }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(io(format!("create {}", parent.display())))?;
         }
-        std::fs::rename(&tree, &target).map_err(io(format!("move the toolchain into {}", target.display())))?;
+        std::fs::rename(&tree, &target)
+            .map_err(io(format!("move the toolchain into {}", target.display())))?;
         progress("installed");
         Ok(receipt)
     }
 }
 
 async fn verify_tree(dir: &Path, spec: &Spec) -> Result<Receipt, ToolchainError> {
-    let body = std::fs::read(dir.join(RECEIPT_FILE)).map_err(io(format!("read {}", dir.join(RECEIPT_FILE).display())))?;
-    let receipt: Receipt = serde_json::from_slice(&body).map_err(io("the receipt is not readable"))?;
+    let body = std::fs::read(dir.join(RECEIPT_FILE))
+        .map_err(io(format!("read {}", dir.join(RECEIPT_FILE).display())))?;
+    let receipt: Receipt =
+        serde_json::from_slice(&body).map_err(io("the receipt is not readable"))?;
     if receipt.key != spec.key
         || receipt.node.archive_sha256 != spec.node.sha256
         || receipt.pnpm.archive_sha256 != spec.pnpm.sha256
     {
         return Err(ToolchainError::Mismatch {
             what: "the installed toolchain".into(),
-            detail: "its receipt names another key or other archives than the ones pinned now".into(),
+            detail: "its receipt names another key or other archives than the ones pinned now"
+                .into(),
         });
     }
-    for (name, record, wanted) in [("node", &receipt.node, &spec.node_version), ("pnpm", &receipt.pnpm, &spec.pnpm_version)] {
+    for (name, record, wanted) in [
+        ("node", &receipt.node, &spec.node_version),
+        ("pnpm", &receipt.pnpm, &spec.pnpm_version),
+    ] {
         let program = dir.join("bin").join(name);
         let path = program.clone();
         let digest = tokio::task::spawn_blocking(move || sha256_file(&path))
@@ -410,7 +455,10 @@ async fn verify_tree(dir: &Path, spec: &Spec) -> Result<Receipt, ToolchainError>
         if digest != record.binary_sha256 {
             return Err(ToolchainError::Mismatch {
                 what: format!("the installed {name}"),
-                detail: format!("it hashes to {digest}, the receipt says {}", record.binary_sha256),
+                detail: format!(
+                    "it hashes to {digest}, the receipt says {}",
+                    record.binary_sha256
+                ),
             });
         }
         program_version(&program, name, wanted).await?;
@@ -419,7 +467,11 @@ async fn verify_tree(dir: &Path, spec: &Spec) -> Result<Receipt, ToolchainError>
 }
 
 /// Run `program --version` with nothing in its environment and require the pinned answer.
-async fn program_version(program: &Path, name: &str, wanted: &str) -> Result<String, ToolchainError> {
+async fn program_version(
+    program: &Path,
+    name: &str,
+    wanted: &str,
+) -> Result<String, ToolchainError> {
     let mut command = tokio::process::Command::new(program);
     command
         .arg("--version")
@@ -429,13 +481,22 @@ async fn program_version(program: &Path, name: &str, wanted: &str) -> Result<Str
         .kill_on_drop(true);
     let output = tokio::time::timeout(VERSION_TIMEOUT, command.output())
         .await
-        .map_err(|_| ToolchainError::WrongProgram { program: name.into(), detail: "`--version` did not finish".into() })?
-        .map_err(|error| ToolchainError::WrongProgram { program: name.into(), detail: format!("cannot run {}: {error}", program.display()) })?;
+        .map_err(|_| ToolchainError::WrongProgram {
+            program: name.into(),
+            detail: "`--version` did not finish".into(),
+        })?
+        .map_err(|error| ToolchainError::WrongProgram {
+            program: name.into(),
+            detail: format!("cannot run {}: {error}", program.display()),
+        })?;
     let said = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !output.status.success() || said != wanted {
         return Err(ToolchainError::WrongProgram {
             program: name.into(),
-            detail: format!("`--version` printed {said:?} (exit {:?}); the pinned version is {wanted:?}", output.status.code()),
+            detail: format!(
+                "`--version` printed {said:?} (exit {:?}); the pinned version is {wanted:?}",
+                output.status.code()
+            ),
         });
     }
     Ok(said)
@@ -481,7 +542,9 @@ impl InstallLock {
         loop {
             match file.try_lock() {
                 Ok(()) => return Ok(Self { file }),
-                Err(TryLockError::WouldBlock) if Instant::now() < deadline => tokio::time::sleep(Duration::from_millis(50)).await,
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(50)).await
+                }
                 Err(TryLockError::WouldBlock) => {
                     return Err(ToolchainError::Io(format!(
                         "another install has held {} for {} s",
@@ -489,7 +552,12 @@ impl InstallLock {
                         timeout.as_secs()
                     )))
                 }
-                Err(TryLockError::Error(error)) => return Err(ToolchainError::Io(format!("lock {}: {error}", path.display()))),
+                Err(TryLockError::Error(error)) => {
+                    return Err(ToolchainError::Io(format!(
+                        "lock {}: {error}",
+                        path.display()
+                    )))
+                }
             }
         }
     }
@@ -512,13 +580,18 @@ async fn fetch(
     let destination = staging.join(name);
     let mut hasher = Sha256::new();
     let mut total: u64 = 0;
-    let mut out = tokio::fs::File::create(&destination).await.map_err(io(format!("create {}", destination.display())))?;
+    let mut out = tokio::fs::File::create(&destination)
+        .await
+        .map_err(io(format!("create {}", destination.display())))?;
     let mut accept = |chunk: &[u8]| -> Result<(), ToolchainError> {
         total += chunk.len() as u64;
         if total > artifact.size {
             return Err(ToolchainError::Mismatch {
                 what: artifact.file_name().to_string(),
-                detail: format!("it is larger than the pinned {} bytes; the transfer was cut off", artifact.size),
+                detail: format!(
+                    "it is larger than the pinned {} bytes; the transfer was cut off",
+                    artifact.size
+                ),
             });
         }
         hasher.update(chunk);
@@ -526,12 +599,18 @@ async fn fetch(
     };
     match source {
         Source::Network => {
-            progress(&format!("downloading {} ({} bytes)", artifact.url, artifact.size));
+            progress(&format!(
+                "downloading {} ({} bytes)",
+                artifact.url, artifact.size
+            ));
             let client = reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(20))
                 .timeout(Duration::from_secs(30 * 60))
                 .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                    let same_scheme = attempt.previous().first().is_some_and(|first| first.scheme() == attempt.url().scheme());
+                    let same_scheme = attempt
+                        .previous()
+                        .first()
+                        .is_some_and(|first| first.scheme() == attempt.url().scheme());
                     if attempt.previous().len() < 5 && same_scheme {
                         attempt.follow()
                     } else {
@@ -540,21 +619,31 @@ async fn fetch(
                 }))
                 .build()
                 .map_err(|error| ToolchainError::Io(format!("http client: {error}")))?;
-            let mut response = client
-                .get(&artifact.url)
-                .send()
-                .await
-                .map_err(|error| ToolchainError::Unreachable { url: artifact.url.clone(), detail: describe(&error) })?;
+            let mut response = client.get(&artifact.url).send().await.map_err(|error| {
+                ToolchainError::Unreachable {
+                    url: artifact.url.clone(),
+                    detail: describe(&error),
+                }
+            })?;
             if !response.status().is_success() {
-                return Err(ToolchainError::BadResponse { url: artifact.url.clone(), detail: format!("HTTP {}", response.status()) });
+                return Err(ToolchainError::BadResponse {
+                    url: artifact.url.clone(),
+                    detail: format!("HTTP {}", response.status()),
+                });
             }
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(|error| ToolchainError::Unreachable { url: artifact.url.clone(), detail: describe(&error) })?
+            while let Some(chunk) =
+                response
+                    .chunk()
+                    .await
+                    .map_err(|error| ToolchainError::Unreachable {
+                        url: artifact.url.clone(),
+                        detail: describe(&error),
+                    })?
             {
                 accept(&chunk)?;
-                out.write_all(&chunk).await.map_err(io("write the download"))?;
+                out.write_all(&chunk)
+                    .await
+                    .map_err(io("write the download"))?;
             }
         }
         Source::Directory(dir) => {
@@ -567,12 +656,16 @@ async fn fetch(
             )))?;
             let mut buffer = vec![0_u8; 256 * 1024];
             loop {
-                let n = tokio::io::AsyncReadExt::read(&mut input, &mut buffer).await.map_err(io(format!("read {}", path.display())))?;
+                let n = tokio::io::AsyncReadExt::read(&mut input, &mut buffer)
+                    .await
+                    .map_err(io(format!("read {}", path.display())))?;
                 if n == 0 {
                     break;
                 }
                 accept(&buffer[..n])?;
-                out.write_all(&buffer[..n]).await.map_err(io("copy the archive"))?;
+                out.write_all(&buffer[..n])
+                    .await
+                    .map_err(io("copy the archive"))?;
             }
         }
     }
@@ -582,7 +675,10 @@ async fn fetch(
     if total != artifact.size || digest != artifact.sha256 {
         return Err(ToolchainError::Mismatch {
             what: artifact.file_name().to_string(),
-            detail: format!("{total} bytes with sha256 {digest}; pinned: {} bytes with sha256 {}", artifact.size, artifact.sha256),
+            detail: format!(
+                "{total} bytes with sha256 {digest}; pinned: {} bytes with sha256 {}",
+                artifact.size, artifact.sha256
+            ),
         });
     }
     Ok(destination)
@@ -601,8 +697,17 @@ fn describe(error: &reqwest::Error) -> String {
 
 /// Write the one regular file `artifact.entry` of the gzip-compressed tar at `archive` to `destination` (mode 0755)
 /// and return its SHA-256. Every other entry is skipped unread.
-async fn extract_entry(archive: &Path, artifact: &Artifact, destination: &Path) -> Result<String, ToolchainError> {
-    let (archive, entry, destination, file) = (archive.to_path_buf(), artifact.entry.clone(), destination.to_path_buf(), artifact.file_name().to_string());
+async fn extract_entry(
+    archive: &Path,
+    artifact: &Artifact,
+    destination: &Path,
+) -> Result<String, ToolchainError> {
+    let (archive, entry, destination, file) = (
+        archive.to_path_buf(),
+        artifact.entry.clone(),
+        destination.to_path_buf(),
+        artifact.file_name().to_string(),
+    );
     tokio::task::spawn_blocking(move || -> Result<String, ToolchainError> {
         let bad = |detail: String| ToolchainError::BadArchive { file: file.clone(), detail };
         let reader = File::open(&archive).map_err(io(format!("open {}", archive.display())))?;
@@ -656,8 +761,14 @@ mod pins {
 
     #[test]
     fn the_pinned_key_is_the_one_the_service_builds_against() {
-        assert_eq!(TOOLCHAIN_KEY, local_app_builder_service::runtime_profiles::RUNTIME_PROFILE_TOOLCHAIN_KEY);
-        assert!(TOOLCHAIN_KEY.contains(&format!("node@{}", NODE_VERSION_OUTPUT.trim_start_matches('v'))));
+        assert_eq!(
+            TOOLCHAIN_KEY,
+            local_app_builder_service::runtime_profiles::RUNTIME_PROFILE_TOOLCHAIN_KEY
+        );
+        assert!(TOOLCHAIN_KEY.contains(&format!(
+            "node@{}",
+            NODE_VERSION_OUTPUT.trim_start_matches('v')
+        )));
         assert!(TOOLCHAIN_KEY.contains(&format!("pnpm@{PNPM_VERSION_OUTPUT}")));
     }
 
@@ -665,17 +776,33 @@ mod pins {
     fn every_pin_is_complete_and_comes_from_its_own_publisher_over_https() {
         for platform in [Platform::DarwinArm64, Platform::DarwinX64] {
             let spec = Spec::pinned(platform);
-            for (artifact, host) in [(&spec.node, "https://nodejs.org/dist/v26.9.0/"), (&spec.pnpm, "https://registry.npmjs.org/@pnpm/exe.")] {
+            for (artifact, host) in [
+                (&spec.node, "https://nodejs.org/dist/v26.9.0/"),
+                (&spec.pnpm, "https://registry.npmjs.org/@pnpm/exe."),
+            ] {
                 assert!(artifact.url.starts_with(host), "{}", artifact.url);
                 assert!(artifact.url.contains(platform.name()), "{}", artifact.url);
                 assert_eq!(artifact.sha256.len(), 64);
-                assert!(artifact.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{}", artifact.sha256);
+                assert!(
+                    artifact
+                        .sha256
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                    "{}",
+                    artifact.sha256
+                );
                 assert!(artifact.size > 1_000_000, "{}", artifact.url);
             }
-            assert_eq!(spec.node.entry, format!("node-v26.9.0-{}/bin/node", platform.name()));
+            assert_eq!(
+                spec.node.entry,
+                format!("node-v26.9.0-{}/bin/node", platform.name())
+            );
             assert_eq!(spec.pnpm.entry, "package/pnpm");
         }
-        let (a, b) = (Spec::pinned(Platform::DarwinArm64), Spec::pinned(Platform::DarwinX64));
+        let (a, b) = (
+            Spec::pinned(Platform::DarwinArm64),
+            Spec::pinned(Platform::DarwinX64),
+        );
         assert_ne!(a.node.sha256, b.node.sha256);
         assert_ne!(a.pnpm.sha256, b.pnpm.sha256);
     }
@@ -683,6 +810,9 @@ mod pins {
     #[test]
     fn the_node_pin_for_apple_silicon_is_the_one_p1_downloaded_and_checked() {
         // 6f3de7ed… is what the P1 run hashed the downloaded archive to, and what SHASUMS256.txt said.
-        assert!(Spec::pinned(Platform::DarwinArm64).node.sha256.starts_with("6f3de7ed853ee283"));
+        assert!(Spec::pinned(Platform::DarwinArm64)
+            .node
+            .sha256
+            .starts_with("6f3de7ed853ee283"));
     }
 }

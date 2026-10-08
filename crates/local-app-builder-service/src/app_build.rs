@@ -671,7 +671,9 @@ fn local_app_build_mount(app_id: &str, channel: &str, build_root: &Path) -> Moun
     Mount {
         host_path: build_root.to_path_buf(),
 
-        guest_path: local_app_builder_contracts::guest_paths::local_app_build_project(app_id, channel),
+        guest_path: local_app_builder_contracts::guest_paths::local_app_build_project(
+            app_id, channel,
+        ),
 
         read_only: false,
         kind: MountKind::Project,
@@ -2975,7 +2977,9 @@ mod tests {
         Diagnostic, DiagnosticSeverity, DiagnosticsSettleState, DiagnosticsSettleStatus,
         FileDiagnostics,
     };
-    use local_app_builder_contracts::execution::{CommandOutcome, Enforcement, IsolatedCommand, Mount};
+    use local_app_builder_contracts::execution::{
+        CommandOutcome, Enforcement, IsolatedCommand, Mount,
+    };
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Mutex;
@@ -4689,7 +4693,9 @@ mod tests {
             assert_eq!(request.mounts[0].host_path, workspace);
             assert_eq!(
                 request.mounts[0].guest_path,
-                local_app_builder_contracts::guest_paths::local_app_build_project("aaaa1111", "store")
+                local_app_builder_contracts::guest_paths::local_app_build_project(
+                    "aaaa1111", "store"
+                )
             );
             assert_eq!(
                 request.cwd.as_deref(),

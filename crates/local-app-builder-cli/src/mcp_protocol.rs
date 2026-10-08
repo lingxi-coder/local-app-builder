@@ -102,7 +102,11 @@ impl ToolResult {
     /// A failure the model can read.
     #[must_use]
     pub fn failure(message: impl Into<String>) -> Self {
-        Self { content: vec![json!({"type": "text", "text": message.into()})], structured: None, is_error: true }
+        Self {
+            content: vec![json!({"type": "text", "text": message.into()})],
+            structured: None,
+            is_error: true,
+        }
     }
 }
 
@@ -166,7 +170,12 @@ pub trait ToolBackend: Send + Sync {
     /// Every tool, in a deterministic order.
     fn tools(&self) -> Vec<ToolSpec>;
     /// Run one tool. `arguments` is always a JSON object.
-    async fn call(&self, name: &str, arguments: Value, context: &CallContext) -> Result<ToolResult, CallError>;
+    async fn call(
+        &self,
+        name: &str,
+        arguments: Value,
+        context: &CallContext,
+    ) -> Result<ToolResult, CallError>;
 }
 
 /// Why a request to the client got no result.
@@ -185,7 +194,12 @@ pub enum LinkError {
 pub trait ClientLink: Send + Sync {
     /// Send a request and wait up to `timeout` for its result. If the wait is abandoned (the future is dropped) the
     /// client is told the request is cancelled.
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, LinkError>;
+    async fn request(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, LinkError>;
 }
 
 /// How long the person has to answer a question.
@@ -216,7 +230,9 @@ impl Approver for Asking {
             );
         }
         let Some(link) = &self.link else {
-            return Approval::Unavailable("there is no way to reach the client from here. Nothing was done.".into());
+            return Approval::Unavailable(
+                "there is no way to reach the client from here. Nothing was done.".into(),
+            );
         };
         let params = json!({
             "message": request.message,
@@ -226,11 +242,20 @@ impl Approver for Asking {
                 "required": ["approve"],
             },
         });
-        match link.request("elicitation/create", params, APPROVAL_TIMEOUT).await {
+        match link
+            .request("elicitation/create", params, APPROVAL_TIMEOUT)
+            .await
+        {
             Ok(result) => decision(&result),
-            Err(LinkError::Rejected(why)) => Approval::Unavailable(format!("the client refused the question: {why}")),
-            Err(LinkError::TimedOut) => Approval::Unavailable("the person did not answer in time. Nothing was done.".into()),
-            Err(LinkError::Closed) => Approval::Unavailable("the client went away before answering. Nothing was done.".into()),
+            Err(LinkError::Rejected(why)) => {
+                Approval::Unavailable(format!("the client refused the question: {why}"))
+            }
+            Err(LinkError::TimedOut) => {
+                Approval::Unavailable("the person did not answer in time. Nothing was done.".into())
+            }
+            Err(LinkError::Closed) => Approval::Unavailable(
+                "the client went away before answering. Nothing was done.".into(),
+            ),
         }
     }
 }
@@ -291,13 +316,21 @@ fn ok_response(id: &Value, result: Value) -> Value {
 /// The response to a line that could not be parsed as JSON.
 #[must_use]
 pub fn parse_error() -> Value {
-    error_response(&Value::Null, code::PARSE_ERROR, "the line is not valid JSON")
+    error_response(
+        &Value::Null,
+        code::PARSE_ERROR,
+        "the line is not valid JSON",
+    )
 }
 
 /// The response to a line that exceeded the size limit.
 #[must_use]
 pub fn too_large(limit: usize) -> Value {
-    error_response(&Value::Null, code::INVALID_REQUEST, format!("the message is larger than {limit} bytes"))
+    error_response(
+        &Value::Null,
+        code::INVALID_REQUEST,
+        format!("the message is larger than {limit} bytes"),
+    )
 }
 
 impl<B: ToolBackend> Session<B> {
@@ -330,13 +363,18 @@ impl<B: ToolBackend> Session<B> {
         };
         let method = object.get("method").and_then(Value::as_str);
         let id = object.get("id");
-        let (Some(method), true) = (method, object.get("jsonrpc").and_then(Value::as_str) == Some("2.0")) else {
+        let (Some(method), true) = (
+            method,
+            object.get("jsonrpc").and_then(Value::as_str) == Some("2.0"),
+        ) else {
             // A response from the client (it has no method) or something that is not JSON-RPC: this server never
             // sends requests, so there is nothing a response could answer.
             return match (id, method) {
-                (Some(id), Some(_)) if is_valid_id(id) => {
-                    Reply::Response(error_response(id, code::INVALID_REQUEST, "not a JSON-RPC 2.0 request"))
-                }
+                (Some(id), Some(_)) if is_valid_id(id) => Reply::Response(error_response(
+                    id,
+                    code::INVALID_REQUEST,
+                    "not a JSON-RPC 2.0 request",
+                )),
                 _ => Reply::None,
             };
         };
@@ -359,7 +397,9 @@ impl<B: ToolBackend> Session<B> {
         // `notifications/cancelled` is acted on by the transport loop, which owns the in-flight calls. The rest
         // (`initialized`, `roots/list_changed`, anything unknown) change nothing a stateless server holds, except
         // that `initialized` completes a legacy session.
-        if method == "notifications/initialized" && self.legacy_initialize_seen.load(Ordering::SeqCst) {
+        if method == "notifications/initialized"
+            && self.legacy_initialize_seen.load(Ordering::SeqCst)
+        {
             self.legacy_initialized.store(true, Ordering::SeqCst);
         }
     }
@@ -375,7 +415,9 @@ impl<B: ToolBackend> Session<B> {
         }
         // Which era is this request in?
         match requested_version(params) {
-            Requested::Version(version) if version == MODERN_VERSION => self.modern(id, method, params).await,
+            Requested::Version(version) if version == MODERN_VERSION => {
+                self.modern(id, method, params).await
+            }
             Requested::Version(version) => unsupported_version(id, Some(version)),
             Requested::NotAString => error_response(
                 id,
@@ -418,7 +460,11 @@ impl<B: ToolBackend> Session<B> {
             },
             // `ping`, `logging/setLevel` and the rest of what the modern revision removed, and everything this
             // server does not offer, are the same answer.
-            other => error_response(id, code::METHOD_NOT_FOUND, format!("method not found: {other}")),
+            other => error_response(
+                id,
+                code::METHOD_NOT_FOUND,
+                format!("method not found: {other}"),
+            ),
         }
     }
 
@@ -450,14 +496,21 @@ impl<B: ToolBackend> Session<B> {
     // ----- legacy -------------------------------------------------------------------------------------------------
 
     fn initialize(&self, id: &Value, params: Option<&Map<String, Value>>) -> Value {
-        let requested = params.and_then(|p| p.get("protocolVersion")).and_then(Value::as_str);
+        let requested = params
+            .and_then(|p| p.get("protocolVersion"))
+            .and_then(Value::as_str);
         if requested.is_none() {
-            return error_response(id, code::INVALID_PARAMS, "initialize needs params.protocolVersion");
+            return error_response(
+                id,
+                code::INVALID_PARAMS,
+                "initialize needs params.protocolVersion",
+            );
         }
         // A client that asks for a version this server does not serve is answered with the one it does, and
         // decides for itself whether to continue: that is the legacy negotiation.
         self.legacy_initialize_seen.store(true, Ordering::SeqCst);
-        *self.legacy_capabilities.lock().expect("capabilities") = params.and_then(|p| p.get("capabilities")).cloned();
+        *self.legacy_capabilities.lock().expect("capabilities") =
+            params.and_then(|p| p.get("capabilities")).cloned();
         let mut result = json!({
             "protocolVersion": LEGACY_VERSION,
             "capabilities": capabilities(),
@@ -491,7 +544,11 @@ impl<B: ToolBackend> Session<B> {
                 Ok(tool) => ok_response(id, tool_result_json(&tool, false)),
                 Err(error) => call_failure(id, error),
             },
-            other => error_response(id, code::METHOD_NOT_FOUND, format!("method not found: {other}")),
+            other => error_response(
+                id,
+                code::METHOD_NOT_FOUND,
+                format!("method not found: {other}"),
+            ),
         }
     }
 
@@ -503,8 +560,13 @@ impl<B: ToolBackend> Session<B> {
         tools.iter().map(tool_json).collect()
     }
 
-    async fn call(&self, params: Option<&Map<String, Value>>, modern: bool) -> Result<ToolResult, CallFailure> {
-        let params = params.ok_or_else(|| CallFailure::Invalid("tools/call needs params".into()))?;
+    async fn call(
+        &self,
+        params: Option<&Map<String, Value>>,
+        modern: bool,
+    ) -> Result<ToolResult, CallFailure> {
+        let params =
+            params.ok_or_else(|| CallFailure::Invalid("tools/call needs params".into()))?;
         let name = params
             .get("name")
             .and_then(Value::as_str)
@@ -512,12 +574,22 @@ impl<B: ToolBackend> Session<B> {
         let arguments = match params.get("arguments") {
             None | Some(Value::Null) => json!({}),
             Some(value @ Value::Object(_)) => value.clone(),
-            Some(_) => return Err(CallFailure::Invalid("params.arguments must be an object".into())),
+            Some(_) => {
+                return Err(CallFailure::Invalid(
+                    "params.arguments must be an object".into(),
+                ))
+            }
         };
         let capabilities = if modern {
-            params.get("_meta").and_then(|m| m.get(META_CLIENT_CAPABILITIES)).cloned()
+            params
+                .get("_meta")
+                .and_then(|m| m.get(META_CLIENT_CAPABILITIES))
+                .cloned()
         } else {
-            self.legacy_capabilities.lock().expect("capabilities").clone()
+            self.legacy_capabilities
+                .lock()
+                .expect("capabilities")
+                .clone()
         };
         let context = CallContext {
             approver: Arc::new(Asking {
@@ -526,10 +598,15 @@ impl<B: ToolBackend> Session<B> {
                 elicitation: can_elicit(capabilities.as_ref()),
             }),
         };
-        self.backend.call(name, arguments, &context).await.map_err(|error| match error {
-            CallError::UnknownTool(tool) => CallFailure::Invalid(format!("Unknown tool: {tool}")),
-            CallError::Internal(message) => CallFailure::Internal(message),
-        })
+        self.backend
+            .call(name, arguments, &context)
+            .await
+            .map_err(|error| match error {
+                CallError::UnknownTool(tool) => {
+                    CallFailure::Invalid(format!("Unknown tool: {tool}"))
+                }
+                CallError::Internal(message) => CallFailure::Internal(message),
+            })
     }
 }
 
@@ -552,7 +629,10 @@ enum Requested<'a> {
 }
 
 fn requested_version(params: Option<&Map<String, Value>>) -> Requested<'_> {
-    match params.and_then(|p| p.get("_meta")).and_then(|m| m.get(META_PROTOCOL_VERSION)) {
+    match params
+        .and_then(|p| p.get("_meta"))
+        .and_then(|m| m.get(META_PROTOCOL_VERSION))
+    {
         None => Requested::Absent,
         Some(Value::String(version)) => Requested::Version(version),
         Some(_) => Requested::NotAString,
@@ -626,7 +706,12 @@ mod tests {
                 .collect()
         }
 
-        async fn call(&self, name: &str, arguments: Value, _context: &CallContext) -> Result<ToolResult, CallError> {
+        async fn call(
+            &self,
+            name: &str,
+            arguments: Value,
+            _context: &CallContext,
+        ) -> Result<ToolResult, CallError> {
             match name {
                 "alpha" => Ok(ToolResult {
                     content: vec![json!({"type": "text", "text": "ok"})],
@@ -643,7 +728,11 @@ mod tests {
     fn session() -> Session<Table> {
         Session::new(
             Arc::new(Table),
-            ServerIdentity { name: "local-app-builder".into(), version: "9.9.9".into(), instructions: Some("hello".into()) },
+            ServerIdentity {
+                name: "local-app-builder".into(),
+                version: "9.9.9".into(),
+                instructions: Some("hello".into()),
+            },
         )
     }
 
@@ -684,25 +773,40 @@ mod tests {
         )
         .await;
         assert_eq!(init["result"]["protocolVersion"], LEGACY_VERSION);
-        let reply = session.handle(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
+        let reply = session
+            .handle(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+            .await;
         assert_eq!(reply, Reply::None);
     }
 
     #[tokio::test]
     async fn discover_lists_both_versions_and_identifies_the_server() {
-        let reply = answer(&session(), modern_request(1, "server/discover", Value::Null)).await;
+        let reply = answer(
+            &session(),
+            modern_request(1, "server/discover", Value::Null),
+        )
+        .await;
         let result = &reply["result"];
         assert_eq!(result["resultType"], "complete");
-        assert_eq!(result["supportedVersions"], json!(["2026-07-28", "2025-11-25"]));
+        assert_eq!(
+            result["supportedVersions"],
+            json!(["2026-07-28", "2025-11-25"])
+        );
         assert_eq!(result["capabilities"], json!({"tools": {}}));
-        assert_eq!(result["_meta"][META_SERVER_INFO], json!({"name": "local-app-builder", "version": "9.9.9"}));
+        assert_eq!(
+            result["_meta"][META_SERVER_INFO],
+            json!({"name": "local-app-builder", "version": "9.9.9"})
+        );
         assert_eq!(result["instructions"], "hello");
     }
 
     #[tokio::test]
     async fn discover_without_metadata_still_answers_because_it_is_the_probe() {
         let reply = answer(&session(), request(1, "server/discover", Value::Null)).await;
-        assert_eq!(reply["result"]["supportedVersions"], json!(["2026-07-28", "2025-11-25"]));
+        assert_eq!(
+            reply["result"]["supportedVersions"],
+            json!(["2026-07-28", "2025-11-25"])
+        );
     }
 
     #[tokio::test]
@@ -711,7 +815,12 @@ mod tests {
         assert_eq!(reply["id"], 7);
         let result = &reply["result"];
         assert_eq!(result["resultType"], "complete");
-        let names: Vec<_> = result["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        let names: Vec<_> = result["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, ["alpha", "zeta"]);
         assert_eq!(result["tools"][0]["annotations"]["readOnlyHint"], true);
         assert_eq!(result["ttlMs"], TOOLS_TTL_MS);
@@ -720,7 +829,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_modern_call_returns_a_complete_result_with_structured_content() {
-        let reply = answer(&session(), modern_request(2, "tools/call", json!({"name": "alpha", "arguments": {"x": 1}}))).await;
+        let reply = answer(
+            &session(),
+            modern_request(
+                2,
+                "tools/call",
+                json!({"name": "alpha", "arguments": {"x": 1}}),
+            ),
+        )
+        .await;
         let result = &reply["result"];
         assert_eq!(result["resultType"], "complete");
         assert_eq!(result["isError"], false);
@@ -730,7 +847,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_tool_that_reports_failure_is_a_result_not_a_protocol_error() {
-        let reply = answer(&session(), modern_request(2, "tools/call", json!({"name": "refuses"}))).await;
+        let reply = answer(
+            &session(),
+            modern_request(2, "tools/call", json!({"name": "refuses"})),
+        )
+        .await;
         assert!(reply.get("error").is_none());
         assert_eq!(reply["result"]["isError"], true);
         assert_eq!(reply["result"]["content"][0]["text"], "cannot");
@@ -738,16 +859,28 @@ mod tests {
 
     #[tokio::test]
     async fn an_unknown_tool_and_a_server_failure_are_protocol_errors_with_the_right_codes() {
-        let unknown = answer(&session(), modern_request(3, "tools/call", json!({"name": "nope"}))).await;
+        let unknown = answer(
+            &session(),
+            modern_request(3, "tools/call", json!({"name": "nope"})),
+        )
+        .await;
         assert_eq!(unknown["error"]["code"], code::INVALID_PARAMS);
         assert_eq!(unknown["error"]["message"], "Unknown tool: nope");
-        let broken = answer(&session(), modern_request(4, "tools/call", json!({"name": "breaks"}))).await;
+        let broken = answer(
+            &session(),
+            modern_request(4, "tools/call", json!({"name": "breaks"})),
+        )
+        .await;
         assert_eq!(broken["error"]["code"], code::INTERNAL_ERROR);
     }
 
     #[tokio::test]
     async fn bad_call_parameters_are_invalid_params() {
-        for params in [json!({}), json!({"name": 5}), json!({"name": "alpha", "arguments": [1]})] {
+        for params in [
+            json!({}),
+            json!({"name": 5}),
+            json!({"name": "alpha", "arguments": [1]}),
+        ] {
             let reply = answer(&session(), modern_request(1, "tools/call", params.clone())).await;
             assert_eq!(reply["error"]["code"], code::INVALID_PARAMS, "{params}");
         }
@@ -759,7 +892,11 @@ mod tests {
             let mut message = modern_request(5, "tools/list", Value::Null);
             message["params"]["_meta"][META_PROTOCOL_VERSION] = json!(version);
             let reply = answer(&session(), message).await;
-            assert_eq!(reply["error"]["code"], code::UNSUPPORTED_PROTOCOL_VERSION, "{version}");
+            assert_eq!(
+                reply["error"]["code"],
+                code::UNSUPPORTED_PROTOCOL_VERSION,
+                "{version}"
+            );
             assert_eq!(
                 reply["error"]["data"],
                 json!({"supported": ["2026-07-28", "2025-11-25"], "requested": version}),
@@ -789,7 +926,10 @@ mod tests {
         let reply = answer(&session(), request(1, "tools/list", Value::Null)).await;
         assert_eq!(reply["error"]["code"], code::INVALID_REQUEST);
         let message = reply["error"]["message"].as_str().unwrap();
-        assert!(message.contains("initialize") && message.contains(MODERN_VERSION), "{message}");
+        assert!(
+            message.contains("initialize") && message.contains(MODERN_VERSION),
+            "{message}"
+        );
     }
 
     #[tokio::test]
@@ -798,9 +938,16 @@ mod tests {
         open_legacy(&session).await;
         let list = answer(&session, request(2, "tools/list", Value::Null)).await;
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 2);
-        assert!(list["result"].get("resultType").is_none(), "legacy results carry no resultType");
+        assert!(
+            list["result"].get("resultType").is_none(),
+            "legacy results carry no resultType"
+        );
         assert!(list["result"].get("ttlMs").is_none());
-        let call = answer(&session, request(3, "tools/call", json!({"name": "alpha", "arguments": {}}))).await;
+        let call = answer(
+            &session,
+            request(3, "tools/call", json!({"name": "alpha", "arguments": {}})),
+        )
+        .await;
         assert_eq!(call["result"]["isError"], false);
         assert!(call["result"].get("resultType").is_none());
         let ping = answer(&session, request(4, "ping", Value::Null)).await;
@@ -810,18 +957,29 @@ mod tests {
     #[tokio::test]
     async fn the_legacy_session_is_not_open_until_initialized_arrives() {
         let session = session();
-        let init = answer(&session, request(1, "initialize", json!({"protocolVersion": LEGACY_VERSION}))).await;
+        let init = answer(
+            &session,
+            request(1, "initialize", json!({"protocolVersion": LEGACY_VERSION})),
+        )
+        .await;
         assert_eq!(init["result"]["serverInfo"]["name"], "local-app-builder");
         assert_eq!(init["result"]["instructions"], "hello");
         let early = answer(&session, request(2, "tools/list", Value::Null)).await;
         assert_eq!(early["error"]["code"], code::INVALID_REQUEST);
         // ping is allowed once initialize has been answered, as the legacy lifecycle permits.
-        assert_eq!(answer(&session, request(3, "ping", Value::Null)).await["result"], json!({}));
+        assert_eq!(
+            answer(&session, request(3, "ping", Value::Null)).await["result"],
+            json!({})
+        );
     }
 
     #[tokio::test]
     async fn initialize_answers_with_the_served_version_whatever_the_client_asked_for() {
-        let reply = answer(&session(), request(1, "initialize", json!({"protocolVersion": "2024-11-05"}))).await;
+        let reply = answer(
+            &session(),
+            request(1, "initialize", json!({"protocolVersion": "2024-11-05"})),
+        )
+        .await;
         assert_eq!(reply["result"]["protocolVersion"], LEGACY_VERSION);
         let bad = answer(&session(), request(1, "initialize", json!({}))).await;
         assert_eq!(bad["error"]["code"], code::INVALID_PARAMS);
@@ -846,8 +1004,14 @@ mod tests {
     #[tokio::test]
     async fn notifications_get_no_reply_and_unknown_ones_are_ignored() {
         let session = session();
-        for method in ["notifications/initialized", "notifications/roots/list_changed", "notifications/whatever"] {
-            let reply = session.handle(&json!({"jsonrpc": "2.0", "method": method})).await;
+        for method in [
+            "notifications/initialized",
+            "notifications/roots/list_changed",
+            "notifications/whatever",
+        ] {
+            let reply = session
+                .handle(&json!({"jsonrpc": "2.0", "method": method}))
+                .await;
             assert_eq!(reply, Reply::None, "{method}");
         }
         // `initialized` without `initialize` does not open a session.
@@ -858,27 +1022,44 @@ mod tests {
     #[tokio::test]
     async fn malformed_messages_are_answered_without_panicking() {
         let session = session();
-        let batch = match session.handle(&json!([{"jsonrpc": "2.0", "id": 1, "method": "ping"}])).await {
+        let batch = match session
+            .handle(&json!([{"jsonrpc": "2.0", "id": 1, "method": "ping"}]))
+            .await
+        {
             Reply::Response(value) => value,
             Reply::None => panic!("a batch is an invalid request"),
         };
         assert_eq!(batch["error"]["code"], code::INVALID_REQUEST);
         assert_eq!(batch["id"], Value::Null);
 
-        let bad_id = answer(&session, json!({"jsonrpc": "2.0", "id": null, "method": "tools/list"})).await;
+        let bad_id = answer(
+            &session,
+            json!({"jsonrpc": "2.0", "id": null, "method": "tools/list"}),
+        )
+        .await;
         assert_eq!(bad_id["error"]["code"], code::INVALID_REQUEST);
-        let bad_id = answer(&session, json!({"jsonrpc": "2.0", "id": 1.5, "method": "tools/list"})).await;
+        let bad_id = answer(
+            &session,
+            json!({"jsonrpc": "2.0", "id": 1.5, "method": "tools/list"}),
+        )
+        .await;
         assert_eq!(bad_id["error"]["code"], code::INVALID_REQUEST);
 
         let no_version = answer(&session, json!({"id": 3, "method": "tools/list"})).await;
         assert_eq!(no_version["error"]["code"], code::INVALID_REQUEST);
         assert_eq!(no_version["id"], 3);
 
-        let bad_params = answer(&session, json!({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": [1]})).await;
+        let bad_params = answer(
+            &session,
+            json!({"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": [1]}),
+        )
+        .await;
         assert_eq!(bad_params["error"]["code"], code::INVALID_PARAMS);
 
         // A client's response to something the server never asked is dropped, not answered.
-        let stray = session.handle(&json!({"jsonrpc": "2.0", "id": 5, "result": {}})).await;
+        let stray = session
+            .handle(&json!({"jsonrpc": "2.0", "id": 5, "result": {}}))
+            .await;
         assert_eq!(stray, Reply::None);
     }
 

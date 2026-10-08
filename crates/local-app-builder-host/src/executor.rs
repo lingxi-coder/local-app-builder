@@ -18,7 +18,9 @@ use crate::path_map::{PathMap, Toolchain};
 use crate::seatbelt::{Policy, Profile, SANDBOX_EXEC};
 use crate::watchdog::{kill_group, kill_group_blocking, sample, SAMPLE_INTERVAL};
 use async_trait::async_trait;
-use local_app_builder_contracts::execution::{CommandOutcome, Enforcement, IsolatedCommand, ResourceLimits};
+use local_app_builder_contracts::execution::{
+    CommandOutcome, Enforcement, IsolatedCommand, ResourceLimits,
+};
 use local_app_builder_service::host::BuildExecutor;
 use std::collections::BTreeMap;
 use std::os::unix::process::ExitStatusExt;
@@ -55,7 +57,10 @@ impl LocalExecutorConfig {
     #[must_use]
     pub fn new(toolchain_root: PathBuf, private_roots: Vec<PathBuf>) -> Self {
         Self {
-            toolchain: Toolchain { guest_bin: "/usr/bin".into(), host_bin: toolchain_root.join("bin") },
+            toolchain: Toolchain {
+                guest_bin: "/usr/bin".into(),
+                host_bin: toolchain_root.join("bin"),
+            },
             toolchain_root,
             private_roots,
             sample_interval: SAMPLE_INTERVAL,
@@ -145,7 +150,10 @@ impl LocalExecutor {
         }
         let map = PathMap::new(&command.mounts, &self.config.toolchain)?;
         let program = map.program(&command.command)?;
-        let guest_cwd = command.cwd.as_deref().ok_or("the command has no working directory")?;
+        let guest_cwd = command
+            .cwd
+            .as_deref()
+            .ok_or("the command has no working directory")?;
         let cwd = map.directory(guest_cwd)?;
 
         let mut leftovers = Vec::new();
@@ -160,8 +168,15 @@ impl LocalExecutor {
             .collect();
         let mut env = BTreeMap::new();
         for (key, value) in &command.env {
-            let translated = if key == "PATH" { host_path(&self.config.toolchain) } else { map.text(value) };
-            leftovers.extend(map.mentions_guest_root(&translated).map(|_| format!("{key}={value}")));
+            let translated = if key == "PATH" {
+                host_path(&self.config.toolchain)
+            } else {
+                map.text(value)
+            };
+            leftovers.extend(
+                map.mentions_guest_root(&translated)
+                    .map(|_| format!("{key}={value}")),
+            );
             env.insert(key.clone(), translated);
         }
         if let Some(first) = leftovers.first() {
@@ -180,14 +195,33 @@ impl LocalExecutor {
                 writable.push(host);
             }
         }
-        let private = self.config.private_roots.iter().filter_map(|root| std::fs::canonicalize(root).ok()).collect();
-        let profile = Profile::compile(&Policy { network: Some(command.network), writable, readable, private });
-        Ok(Plan { program, args, cwd, env, profile })
+        let private = self
+            .config
+            .private_roots
+            .iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .collect();
+        let profile = Profile::compile(&Policy {
+            network: Some(command.network),
+            writable,
+            readable,
+            private,
+        });
+        Ok(Plan {
+            program,
+            args,
+            cwd,
+            env,
+            profile,
+        })
     }
 }
 
 fn host_path(toolchain: &Toolchain) -> String {
-    format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", toolchain.host_bin.display())
+    format!(
+        "{}:/usr/bin:/bin:/usr/sbin:/sbin",
+        toolchain.host_bin.display()
+    )
 }
 
 fn canonical(path: &std::path::Path) -> Result<PathBuf, String> {
@@ -217,7 +251,9 @@ impl BuildExecutor for LocalExecutor {
             .process_group(0)
             .spawn()
             .map_err(|error| format!("start {}: {error}", plan.program.display()))?;
-        let pgid = child.id().ok_or("the command ended before it could be watched")?;
+        let pgid = child
+            .id()
+            .ok_or("the command ended before it could be watched")?;
         let mut guard = GroupGuard { pgid, armed: true };
         let stdout = tokio::spawn(read_tail(child.stdout.take().ok_or("no stdout pipe")?));
         let stderr = tokio::spawn(read_tail(child.stderr.take().ok_or("no stderr pipe")?));
@@ -232,7 +268,9 @@ impl BuildExecutor for LocalExecutor {
                 .into());
         }
 
-        let deadline = command.timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+        let deadline = command
+            .timeout_ms
+            .map(|ms| Instant::now() + Duration::from_millis(ms));
         let mut ticker = tokio::time::interval(self.config.sample_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut timed_out = false;
@@ -269,7 +307,10 @@ impl BuildExecutor for LocalExecutor {
             }
             if timed_out {
                 // The group has been told to die; collect the leader.
-                break child.wait().await.map_err(|error| format!("wait for the command: {error}"))?;
+                break child
+                    .wait()
+                    .await
+                    .map_err(|error| format!("wait for the command: {error}"))?;
             }
         };
         // Whatever the command left running in its group dies with it.
@@ -285,7 +326,9 @@ impl BuildExecutor for LocalExecutor {
         let out = collect(stdout).await;
         let mut err = collect(stderr).await;
 
-        let mut exit_code = status.code().unwrap_or_else(|| status.signal().map_or(-1, |signal| 128 + signal));
+        let mut exit_code = status
+            .code()
+            .unwrap_or_else(|| status.signal().map_or(-1, |signal| 128 + signal));
         if timed_out {
             exit_code = TIMED_OUT_EXIT_CODE;
         }
@@ -312,7 +355,10 @@ impl BuildExecutor for LocalExecutor {
             exit_code,
             timed_out,
             cancelled: false,
-            enforcement: Enforcement { network_policy_enforced: true, memory_limit_enforced: limit_kib.is_some() },
+            enforcement: Enforcement {
+                network_policy_enforced: true,
+                memory_limit_enforced: limit_kib.is_some(),
+            },
         })
     }
 }

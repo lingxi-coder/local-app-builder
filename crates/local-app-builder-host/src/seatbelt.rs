@@ -91,7 +91,11 @@ impl Profile {
         text.push_str(")\n");
         if !private.is_empty() {
             text.push_str(&format!("(deny file-read-data {private})\n"));
-            let allowed = [readable.as_str(), writable.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+            let allowed = [readable.as_str(), writable.as_str()]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
             if !allowed.is_empty() {
                 text.push_str(&format!("(allow file-read-data {allowed})\n"));
             }
@@ -127,19 +131,38 @@ mod tests {
     #[test]
     fn paths_are_parameters_and_never_part_of_the_profile_text() {
         let nasty = PathBuf::from("/data/\"))(allow network*)(\\x");
-        let profile = Profile::compile(&Policy { writable: vec![nasty.clone()], ..policy() });
+        let profile = Profile::compile(&Policy {
+            writable: vec![nasty.clone()],
+            ..policy()
+        });
         assert!(!profile.text.contains("allow network"), "{}", profile.text);
-        assert!(!profile.text.contains("/data"), "a path leaked into the profile text: {}", profile.text);
-        assert!(profile.params.iter().any(|(_, v)| *v == nasty.to_string_lossy()));
+        assert!(
+            !profile.text.contains("/data"),
+            "a path leaked into the profile text: {}",
+            profile.text
+        );
+        assert!(profile
+            .params
+            .iter()
+            .any(|(_, v)| *v == nasty.to_string_lossy()));
     }
 
     #[test]
     fn each_network_policy_compiles_to_what_it_says() {
-        let text = |network| Profile::compile(&Policy { network, ..policy() }).text;
+        let text = |network| {
+            Profile::compile(&Policy {
+                network,
+                ..policy()
+            })
+            .text
+        };
         assert!(text(Some(NetworkPolicy::Disabled)).contains("(deny network*)"));
         assert!(!text(Some(NetworkPolicy::Disabled)).contains("allow network"));
         let loopback = text(Some(NetworkPolicy::LoopbackOnly));
-        assert!(loopback.contains("(deny network*)") && loopback.contains("(allow network* (remote ip \"localhost:*\"))"));
+        assert!(
+            loopback.contains("(deny network*)")
+                && loopback.contains("(allow network* (remote ip \"localhost:*\"))")
+        );
         assert!(!text(Some(NetworkPolicy::Allowed)).contains("network"));
     }
 
@@ -157,8 +180,15 @@ mod tests {
     #[test]
     fn what_may_be_written_may_also_be_read() {
         let profile = Profile::compile(&policy());
-        let allow = profile.text.lines().find(|l| l.starts_with("(allow file-read-data")).unwrap();
-        assert!(allow.contains("\"W0\"") && allow.contains("\"R0\""), "{allow}");
+        let allow = profile
+            .text
+            .lines()
+            .find(|l| l.starts_with("(allow file-read-data"))
+            .unwrap();
+        assert!(
+            allow.contains("\"W0\"") && allow.contains("\"R0\""),
+            "{allow}"
+        );
     }
 
     #[test]
