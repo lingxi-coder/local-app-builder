@@ -7,9 +7,9 @@ It was developed inside `harness-runtime` (LingXi's engine) and extracted from i
 on any product repository: `scripts/checks/check-deps.sh` holds the graph to that, and `check-contract-digests.sh` pins the
 template catalogue.
 
-**Status.** Extracted from `harness-runtime`, branch `local-app/p2-decouple` at `8f15ed5`, with the history of the files that moved. Its
-remote is the private repository `lingxi-coder/local-app-builder`. **The licence is undecided.** `license` in the manifests is carried over from the source
-workspace and is not a decision, and there is deliberately no LICENSE file; decide before anything is made public.
+**Status.** Extracted from `harness-runtime`, branch `local-app/p2-decouple` at `8f15ed5`, with the history of the files that moved. The
+repository is public (`lingxi-coder/local-app-builder`). **The licence is undecided.** `license` in the manifests is carried over from the source
+workspace and is not a decision, and there is deliberately no LICENSE file, so until one is added nobody is licensed to reuse the code.
 
 ## Layout
 
@@ -25,6 +25,8 @@ workspace and is not a decision, and there is deliberately no LICENSE file; deci
 | `crates/local-app-builder-plugin` | where the plugin tree is, and the schemas, workflow scripts and fixtures a host embeds |
 | `crates/plugins/lingxi-local-app` | the plugin tree: skills, agents, workflows, schemas, template assets (`.inventory.txt` beside it lists its files) |
 | `docs/local-apps` | design history (Chinese) and the performance baselines the core embeds |
+| `docs/runtime` | the runtime seed's pins, policy and SBOM (`local-app-runtime-{pins,policy}.json`, `sbom/`) |
+| `scripts/runtime` | build and attest the runtime seed: `verify-local-app-supply-chain.py`, `stage-local-app-runtime.py`, `build-local-app-node-modules.py`, `generate-local-app-sbom.py` |
 
 ## Build and test
 
@@ -34,6 +36,14 @@ workspace and is not a decision, and there is deliberately no LICENSE file; deci
 `git2` is requested from crates.io with default features off (libgit2 only for local repositories). A workspace that already
 links libgit2 chooses the copy with its own `[patch.crates-io]`: one package may link it. Without the `git-checkpoints`
 feature of `local-apps` (and of `local-app-builder-service`) the graph has no libgit2 at all.
+
+### The runtime seed
+
+The templates under `crates/local-apps/templates/runtime-profiles` are what a host stages onto a device. The scripts in
+`scripts/runtime` check them against the pins in `docs/runtime`, and stage them read-only for a native app bundle. The shared
+toolchain pins (Node, pnpm, TypeScript, the APK identities) belong to the mobile-linux SDK, which this repository does not depend on,
+so every script takes `--sdk-root <checkout>`. `scripts/tests/test-local-app-supply-chain.sh --sdk-root <checkout>` proves the
+verifier rejects what it should; it needs that checkout too, so it runs in the product's CI rather than here.
 
 ## Used by
 
