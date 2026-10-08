@@ -8,8 +8,7 @@ on any product repository: `scripts/checks/check-deps.sh` holds the graph to tha
 template catalogue.
 
 **Status.** Extracted from `harness-runtime`, branch `local-app/p2-decouple` at `8f15ed5`, with the history of the files that moved. The
-repository is public (`lingxi-coder/local-app-builder`). **The licence is undecided.** `license` in the manifests is carried over from the source
-workspace and is not a decision, and there is deliberately no LICENSE file, so until one is added nobody is licensed to reuse the code.
+repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
 ## Layout
 

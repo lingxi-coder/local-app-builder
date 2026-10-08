@@ -15,9 +15,7 @@ members = [
 [workspace.package]
 edition = "2021"
 rust-version = "1.94"
-# Carried over from the engine's workspace unchanged. NOT a licensing decision: the licence of this
-# project is still open.
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [workspace.dependencies]
 async-trait = "0.1"
