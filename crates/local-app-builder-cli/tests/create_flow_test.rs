@@ -271,6 +271,7 @@ fn a_client_that_cannot_be_asked_cannot_approve_and_is_never_sent_a_question() {
     client.finish();
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn an_approved_plan_without_the_toolchain_fails_closed_and_says_how_to_get_it() {
     let data = tempfile::tempdir().unwrap();
@@ -293,6 +294,34 @@ fn an_approved_plan_without_the_toolchain_fails_closed_and_says_how_to_get_it() 
     assert!(
         said.contains("toolchain_not_installed")
             && said.contains("local-app-builder toolchain install"),
+        "{said}"
+    );
+    client.finish();
+}
+
+/// Only a Mac has a pinned toolchain, so elsewhere there is no build executor at all: the approved plan still fails
+/// closed, and says the runtime is missing rather than how to install a toolchain that does not exist for this machine.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn an_approved_plan_on_a_machine_without_a_pinned_toolchain_fails_closed() {
+    let data = tempfile::tempdir().unwrap();
+    let plans = tempfile::tempdir().unwrap();
+    let mut client = Client::start(data.path(), json!({"elicitation": {}}));
+    let (_, _, created) = client.call(
+        "LocalAppCreate",
+        json!({"brief": "Track water"}),
+        Person::Approves,
+    );
+    let id = app_id(&created);
+    let plan = write_plan(plans.path(), "react-dom-r4");
+    let (is_error, said, _) = client.call(
+        "LocalAppPrepare",
+        json!({"app_id": id, "plan_path": plan}),
+        Person::Approves,
+    );
+    assert_eq!(client.questions.len(), 1, "the person was asked once");
+    assert!(
+        is_error && said.contains("Node runtime is unavailable"),
         "{said}"
     );
     client.finish();
