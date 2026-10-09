@@ -5,7 +5,8 @@ Reads `cargo metadata --format-version=1 --no-deps` on stdin. Only *declared* de
 offline. The rules are the ones the crates were arranged to satisfy before they left the engine's repository; they are
 the reason this repository can be built, tested and released without it.
 
-  R1  shared primitives (device-api, local-app-builder-contracts, mcp-wire, rooted-fs) depend on no workspace crate
+  R1  shared primitives (device-api, json-projection, local-app-builder-contracts, mcp-wire, rooted-fs) depend on no workspace
+      crate, except that mcp-wire may name the leaf json-projection (the exact-UTF-16 carrier its DTOs hold)
   R2  local-apps (the core) depends on the workspace only through the primitives
   R3  local-app-builder-service depends on the workspace only through the primitives and local-apps, and takes local-apps
       with its default features off (the service's own `git-checkpoints` feature forwards the one that matters)
@@ -23,7 +24,8 @@ import json
 import os
 import sys
 
-PRIMITIVES = {"device-api", "local-app-builder-contracts", "mcp-wire", "rooted-fs"}
+PRIMITIVES = {"device-api", "json-projection", "local-app-builder-contracts", "mcp-wire", "rooted-fs"}
+PRIMITIVE_DEPS = {"mcp-wire": {"json-projection"}}
 CORE = "local-apps"
 SERVICE = "local-app-builder-service"
 PLUGIN = "local-app-builder-plugin"
@@ -45,8 +47,10 @@ def main():
 
     for n, p in sorted(pkgs.items()):
         deps = ws(p)
-        if n in PRIMITIVES and deps:
-            violations.append("%s depends on %s — shared primitives have no workspace dependencies" % (n, ", ".join(deps)))
+        if n in PRIMITIVES:
+            extra = [d for d in deps if d not in PRIMITIVE_DEPS.get(n, set())]
+            if extra:
+                violations.append("%s depends on %s — shared primitives have no workspace dependencies" % (n, ", ".join(extra)))
         if n == CORE:
             bad = [d for d in deps if d not in PRIMITIVES]
             if bad:

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/device-api",
+    "crates/json-projection",
     "crates/local-app-builder-cli",
     "crates/local-app-builder-contracts",
     "crates/local-app-builder-host",

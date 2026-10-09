@@ -567,6 +567,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "json-projection"
+version = "0.12.0"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,6 +736,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "indexmap",
+ "json-projection",
  "serde",
  "serde_json",
  "thiserror",
@@ -1080,6 +1091,12 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 
 [[package]]
 name = "serde"

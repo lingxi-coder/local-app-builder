@@ -335,6 +335,82 @@ pub struct McpNegotiatedProtocol {
     pub version: String,
 }
 
+/// Server-owned metadata retained from a completed MCP handshake.
+/// This is distinct from the host's configured server identity and permissions.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct McpServerMetadataDto {
+    /// Complete declared capabilities, including protocol-specific nested data.
+    pub raw_capabilities: Option<serde_json::Value>,
+    /// Implementation information advertised by the server.
+    pub server_info: Option<serde_json::Value>,
+    /// Optional server instructions supplied to the model.
+    pub instructions: Option<String>,
+    /// Complete modern discovery result, when negotiation used `server/discover`.
+    pub discovery: Option<serde_json::Value>,
+}
+
+/// Current elicitation capability wire shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpElicitationMode {
+    /// Current explicit bare capability; the MCP schema permits form requests.
+    Bare,
+    /// Both current form and URL elicitation requests are supported.
+    FormAndUrl,
+}
+
+impl McpElicitationMode {
+    /// Exact capability object used on the current MCP wire.
+    #[must_use]
+    pub fn wire(self) -> Value {
+        match self {
+            Self::Bare => serde_json::json!({}),
+            Self::FormAndUrl => serde_json::json!({"form": {}, "url": {}}),
+        }
+    }
+}
+
+/// Frozen capability choices for both current protocol families on one connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct McpElicitationCapabilities {
+    /// Initialize uses per-server eligibility and the explicit bare config.
+    pub legacy: McpElicitationMode,
+    /// Modern discovery and request metadata use the current URL feature gate.
+    pub modern: McpElicitationMode,
+}
+
+impl Default for McpElicitationCapabilities {
+    fn default() -> Self {
+        Self {
+            legacy: McpElicitationMode::FormAndUrl,
+            modern: McpElicitationMode::FormAndUrl,
+        }
+    }
+}
+
+impl McpElicitationCapabilities {
+    /// Default for direct transport calls without an engine config producer.
+    #[must_use]
+    pub fn for_transport(kind: McpTransportKind) -> Self {
+        let mut capabilities = Self::default();
+        if !matches!(
+            kind,
+            McpTransportKind::Stdio
+                | McpTransportKind::Sse
+                | McpTransportKind::Http
+                | McpTransportKind::WebSocket
+        ) {
+            capabilities.legacy = McpElicitationMode::Bare;
+        }
+        capabilities
+    }
+}
+
+/// Closed capability projection; does not advertise absent host task or sampling producers.
+#[must_use]
+pub fn mcp_client_capabilities(elicitation: McpElicitationMode) -> Value {
+    serde_json::json!({"roots": {"listChanged": true}, "elicitation": elicitation.wire()})
+}
+
 /// Options passed to a transport's combined handshake operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct McpConnectOptions {
@@ -346,6 +422,8 @@ pub struct McpConnectOptions {
     /// means no modern probe is requested; transports must still clamp this
     /// value against the remaining total deadline when it is present.
     pub probe_timeout_ms: Option<u64>,
+    /// Capability authority frozen by the current config/host at connect ingress.
+    pub elicitation: McpElicitationCapabilities,
 }
 
 impl Default for McpConnectOptions {
@@ -354,6 +432,7 @@ impl Default for McpConnectOptions {
             expected_era: None,
             deadline_ms: 100_000,
             probe_timeout_ms: None,
+            elicitation: McpElicitationCapabilities::default(),
         }
     }
 }
@@ -485,6 +564,12 @@ pub struct McpConfiguredToolPolicyDto {
 /// One tool advertised by an MCP server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpToolDto {
+    /// Exact UTF-16 projection of `input_schema`, when the wire carried lone surrogates.
+    #[serde(skip)]
+    pub input_schema_projection: Option<json_projection::Utf16JsonProjection>,
+    /// Exact UTF-16 projection of the whole tool definition.
+    #[serde(skip)]
+    pub definition_projection: Option<json_projection::Utf16JsonProjection>,
     /// Server name (logical, e.g. registry key).
     pub server_name: String,
     /// Tool name as exposed by the server.
@@ -651,6 +736,9 @@ pub struct McpPromptArgumentDto {
 /// when the server omits them, so non-claude-code servers decode cleanly.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpToolResultDto {
+    /// Exact UTF-16 projection of the result, when the wire carried lone surrogates.
+    #[serde(skip)]
+    pub result_projection: Option<json_projection::Utf16JsonProjection>,
     /// JSON content returned by the tool.
     pub content: Value,
     /// True when the server flagged the result as an error.
@@ -827,6 +915,11 @@ pub trait McpTransport: Send + Sync {
     /// declared capabilities.
     async fn initialize(&self, conn: &McpRawConnection) -> Result<ServerCapabilitiesDto, McpError>;
 
+    /// Metadata for this live connection, captured by initialize or discovery.
+    fn server_metadata(&self, _id: McpConnectionId) -> Option<McpServerMetadataDto> {
+        None
+    }
+
     /// Enumerate all tools exposed by the server.
     async fn list_tools(&self, conn: &McpRawConnection) -> Result<Vec<McpToolDto>, McpError>;
 
@@ -938,6 +1031,9 @@ mod tests {
     #[test]
     fn mcp_tool_dto_preserves_optional_metadata_fields() {
         let value = serde_json::to_value(McpToolDto {
+            input_schema_projection: None,
+            definition_projection: None,
+
             server_name: "local_app_habits".to_string(),
             tool_name: "save_habit".to_string(),
             description: "Save one habit entry.".to_string(),
@@ -1060,6 +1156,33 @@ mod tests {
     }
 }
 
+/// An SDK result error, retaining the native code and structured data.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct McpSdkError {
+    /// Native SDK error code, e.g. `REQUEST_TIMEOUT`.
+    pub code: &'static str,
+    /// Human-readable message.
+    pub message: String,
+    /// Structured data the server or driver attached.
+    pub data: Option<serde_json::Value>,
+}
+
+impl McpSdkError {
+    /// Build an error from its code, message and optional structured data.
+    pub fn new(
+        code: &'static str,
+        message: impl Into<String>,
+        data: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            data,
+        }
+    }
+}
+
 /// Failure modes shared by every [`McpTransport`] method.
 #[derive(Debug, Clone, Error)]
 pub enum McpError {
@@ -1106,6 +1229,9 @@ pub enum McpError {
         /// Timeout budget in whole seconds.
         secs: u64,
     },
+    /// Native modern result-driver failure, with its SDK code and data.
+    #[error(transparent)]
+    Result(McpSdkError),
     /// Catch-all for unexpected failures.
     #[error("internal error: {0}")]
     Internal(String),
