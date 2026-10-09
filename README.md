@@ -56,6 +56,7 @@ verifier rejects what it should; it needs that checkout too, so it runs in the p
 ## Used by
 
 Nothing links the service or the CLI. The engine (`harness-runtime`) and the LingXi apps contain no Local App code; they take
-four generic libraries from this repository by git pin (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`), which have no
-Local App vocabulary in them, and a person or a model installs the plugin and the server like any other. Claude Code and Codex
-install the same plugin from the same repository.
+four shared libraries from this repository by git pin (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`) and a person or a
+model installs the plugin and the server like any other. Claude Code and Codex install the same plugin from the same repository.
+`mcp-wire` still holds `export` (the Local App conversation-export scope), which the engine's MCP registry names in its managed-server
+API; that is the one piece of Local App vocabulary left in the shared libraries.
