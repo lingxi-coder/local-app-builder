@@ -14,6 +14,8 @@ drifting apart except this gate.
       (`window.lingxi` and `LINGXI.md` are real names and are allowed)
   C6  every `LocalApp…` tool a skill names is one the server offers today (the CLI's SERVED_READ and SERVED_WRITE
       operations, through the service's tool table), and every offered tool is named in the `local-app-builder` skill, so the model is told about it
+  C7  the LingXi plugin tree (`crates/plugins/lingxi-local-app`) is installable on its own: `.lingxi-plugin/marketplace.json` lists it
+      from a path that exists, its manifest is MIT like the repository, and its `.mcp.json` is the same document as the desktop plugin's
 """
 import json
 import os
@@ -22,6 +24,7 @@ import sys
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PLUGIN = "plugins/local-app-builder"
+LINGXI_PLUGIN = "crates/plugins/lingxi-local-app"
 KEBAB = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -132,6 +135,23 @@ def check(root):
         entries = entries_of(doc)
         if entries != [("local-app-builder", "./" + PLUGIN)]:
             problems.append("%s: expected one plugin `local-app-builder` from ./%s, got %s" % (rel, PLUGIN, entries))
+
+    # C7
+    lingxi_market = read_json(root, ".lingxi-plugin/marketplace.json", problems)
+    if lingxi_market is not None:
+        entries = [(p.get("name"), p.get("source")) for p in lingxi_market.get("plugins", [])]
+        if entries != [("lingxi-local-app", "./" + LINGXI_PLUGIN)]:
+            problems.append(".lingxi-plugin/marketplace.json: expected one plugin `lingxi-local-app` from ./%s, got %s" % (LINGXI_PLUGIN, entries))
+    lingxi_manifest = read_json(root, LINGXI_PLUGIN + "/.lingxi-plugin/plugin.json", problems)
+    if lingxi_manifest is not None:
+        if lingxi_manifest.get("name") != "lingxi-local-app":
+            problems.append("%s/.lingxi-plugin/plugin.json: name must be lingxi-local-app (the workflow ids are `lingxi-local-app:<script>`)" % LINGXI_PLUGIN)
+        if lingxi_manifest.get("license") != "MIT":
+            problems.append("%s/.lingxi-plugin/plugin.json: license must be MIT like the repository, got %r" % (LINGXI_PLUGIN, lingxi_manifest.get("license")))
+    lingxi_mcp = read_json(root, LINGXI_PLUGIN + "/.mcp.json", problems)
+    if lingxi_mcp is not None and claude_mcp is not None and lingxi_mcp != claude_mcp:
+        problems.append("%s/.mcp.json must be the same document as %s/.mcp.json" % (LINGXI_PLUGIN, PLUGIN))
+
     if not os.path.isdir(plugin_dir):
         problems.append("%s does not exist" % PLUGIN)
         return problems

@@ -10,7 +10,8 @@ import unittest
 
 REPO = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 GATE = os.path.join(REPO, "scripts/checks/check_client_plugin.py")
-COPIED = ["plugins/local-app-builder", ".agents", ".claude-plugin", "crates/local-app-builder-cli/src/mcp_backend.rs",
+COPIED = ["plugins/local-app-builder", ".agents", ".claude-plugin", ".lingxi-plugin",
+          "crates/plugins/lingxi-local-app/.lingxi-plugin", "crates/plugins/lingxi-local-app/.mcp.json", "crates/local-app-builder-cli/src/mcp_backend.rs",
           "crates/local-app-builder-service/src/tool_names.rs"]
 
 
@@ -53,6 +54,14 @@ class ClientPlugin(unittest.TestCase):
     def test_the_tree_as_committed_passes(self):
         result = self.gate()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_lingxi_plugin_without_the_server_declaration_is_rejected(self):
+        self.edit_json("crates/plugins/lingxi-local-app/.mcp.json", lambda d: d["mcpServers"]["local-app-builder"].update(args=["serve"]))
+        self.rejects("must be the same document as plugins/local-app-builder/.mcp.json")
+
+    def test_a_lingxi_marketplace_that_points_nowhere_is_rejected(self):
+        self.edit_json(".lingxi-plugin/marketplace.json", lambda d: d["plugins"][0].update(source="./plugins/nowhere"))
+        self.rejects(".lingxi-plugin/marketplace.json: expected one plugin `lingxi-local-app`")
 
     def test_manifests_that_disagree_are_rejected(self):
         self.edit_json("plugins/local-app-builder/.claude-plugin/plugin.json", lambda d: d.update(version="0.2.0"))

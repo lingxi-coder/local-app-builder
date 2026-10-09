@@ -6,7 +6,7 @@
   "author": {
     "name": "LingXi"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "defaultEnabled": true,
   "skills": "./skills/",
   "agents": "./agents/",

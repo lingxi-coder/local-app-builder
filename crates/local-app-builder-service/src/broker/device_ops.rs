@@ -311,6 +311,18 @@ pub(super) struct PendingRecordingStart {
     scope: Arc<LocalAppAudioScope>,
 }
 
+/// The stable device-resource owner of one app's runtime generation.
+///
+/// `device-api` has no owner kind for Local Apps (it knows sessions, UI instances and host-owned operations), so a
+/// runtime generation is a host-owned `System` owner whose id encodes `(generation, app id)`. The generation comes first
+/// and is numeric, so the encoding stays injective whatever the app id holds, and two generations of one app never share
+/// an owner.
+pub(super) fn local_app_audio_owner(app_id: &str, runtime_generation: u64) -> AudioOwner {
+    AudioOwner::System {
+        instance_id: format!("local-app:{runtime_generation}:{app_id}"),
+    }
+}
+
 /// Cancellation scope for every audio request admitted by one Local App
 /// runtime generation. It is intentionally host-local and generation-scoped:
 /// cancelling it never tombstones the stable AudioOwner used by the service.
@@ -604,10 +616,7 @@ fn local_audio_context_for_owner(
     };
     AudioOperationContext {
         identity,
-        owner: AudioOwner::LocalApp {
-            app_id: app_id.to_string(),
-            runtime_generation,
-        },
+        owner: local_app_audio_owner(app_id, runtime_generation),
         initiator: Some(initiator),
         timeout_budget_ms: Some(timeout_budget_ms),
         max_payload_bytes: capabilities.max_payload_bytes,
@@ -2441,6 +2450,15 @@ mod tests {
     use tokio::time::timeout;
 
     // ---- fakes ------------------------------------------------------------
+
+    /// `(app id, runtime generation)` of an owner minted by `local_app_audio_owner`.
+    fn decode_owner(owner: &AudioOwner) -> Option<(String, u64)> {
+        let AudioOwner::System { instance_id } = owner else {
+            return None;
+        };
+        let (generation, app_id) = instance_id.strip_prefix("local-app:")?.split_once(':')?;
+        Some((app_id.to_string(), generation.parse().ok()?))
+    }
 
     #[derive(Default)]
     struct FakeCamera {
@@ -4303,10 +4321,7 @@ mod tests {
                 .active
                 .lock()
                 .unwrap()
-                .contains_key(&AudioOwner::LocalApp {
-                    app_id: h.app_id.clone(),
-                    runtime_generation: new_generation,
-                }),
+                .contains_key(&super::local_app_audio_owner(&h.app_id, new_generation)),
             "an old generation's teardown must target only its owner"
         );
         assert!(matches!(
@@ -4350,7 +4365,7 @@ mod tests {
         ));
         assert!(matches!(
             &audio.operations.lock().unwrap().last().expect("listen operation").0.owner,
-            AudioOwner::LocalApp { app_id, runtime_generation } if app_id == &h.app_id && *runtime_generation > 0
+            owner if matches!(decode_owner(owner), Some((app_id, generation)) if app_id == h.app_id && generation > 0)
         ));
     }
 
@@ -4816,7 +4831,7 @@ mod tests {
         ));
         assert!(matches!(
             audio_context.owner,
-            AudioOwner::LocalApp { ref app_id, runtime_generation } if app_id == &h.app_id && runtime_generation == expected_generation
+            ref owner if decode_owner(owner) == Some((h.app_id.clone(), expected_generation))
         ));
         assert_eq!(
             audio_context
@@ -4897,8 +4912,7 @@ mod tests {
         assert!(matches!(operation, AudioOperation::Synthesize { .. }));
         assert!(matches!(
             context.owner,
-            AudioOwner::LocalApp { ref app_id, runtime_generation: generation }
-                if app_id == &h.app_id && generation == runtime_generation
+            ref owner if decode_owner(owner) == Some((h.app_id.clone(), runtime_generation))
         ));
         assert_eq!(
             context.initiator.and_then(|initiator| initiator.request_id),

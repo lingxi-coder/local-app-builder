@@ -1,5 +1,6 @@
 
 .lingxi-plugin/plugin.json
+.mcp.json
 agents/mcp-designer.md
 agents/mcp-promoter.md
 agents/operator.md

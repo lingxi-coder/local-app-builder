@@ -39,14 +39,9 @@ impl AudioOperationId {
 pub enum AudioOwner {
     /// Conversation session; tool and agent IDs do not change its lifetime.
     Session { session_id: String },
-    /// Local App runtime instance.
-    LocalApp {
-        app_id: String,
-        runtime_generation: u64,
-    },
     /// UI app instance.
     Ui { instance_id: String },
-    /// Host-owned operation outside a chat or Local App.
+    /// Host-owned operation outside a chat.
     System { instance_id: String },
 }
 
@@ -57,7 +52,7 @@ pub struct AudioInitiator {
     pub agent_id: Option<String>,
     /// Tool-use identifier, when called by a model tool.
     pub tool_use_id: Option<String>,
-    /// Host request identifier, when called by a Local App or UI.
+    /// Host request identifier, when called by a hosted app or UI.
     pub request_id: Option<String>,
 }
 

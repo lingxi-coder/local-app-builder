@@ -7,8 +7,16 @@ It was developed inside `harness-runtime` (LingXi's engine) and extracted from i
 on any product repository: `scripts/checks/check-deps.sh` holds the graph to that, and `check-contract-digests.sh` pins the
 template catalogue.
 
-**Status.** Extracted from `harness-runtime`, branch `local-app/p2-decouple` at `8f15ed5`, with the history of the files that moved. The
-repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
+**Status.** Two things ship from here, and an app that wants Local Apps takes both without linking either:
+
+* **the plugin**, installed from this repository as a marketplace: skills, agents, workflows, schemas and the `.mcp.json` that
+  declares the server. For Claude Code and Codex it is `plugins/local-app-builder` (listed in `.claude-plugin/marketplace.json` and
+  `.agents/plugins/marketplace.json`); for LingXi it is `crates/plugins/lingxi-local-app` (listed in `.lingxi-plugin/marketplace.json`).
+  `scripts/checks/check-client-plugin.sh` keeps the manifests, marketplaces and `.mcp.json` files in agreement.
+* **the MCP server**, the `local-app-builder` binary (`cargo build --release -p local-app-builder-cli`), started by the client as
+  `local-app-builder mcp` over stdio. It is a separate download, not a library: no application links `local-app-builder-service`.
+
+The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
 ## Layout
 
@@ -47,5 +55,7 @@ verifier rejects what it should; it needs that checkout too, so it runs in the p
 
 ## Used by
 
-`harness-runtime` (LingXi's engine) and, through it, the LingXi mobile app. Both must pin this repository at the same
-revision. Desktop agents (Codex, Claude Code) are the next consumers.
+Nothing links the service or the CLI. The engine (`harness-runtime`) and the LingXi apps contain no Local App code; they take
+four generic libraries from this repository by git pin (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`), which have no
+Local App vocabulary in them, and a person or a model installs the plugin and the server like any other. Claude Code and Codex
+install the same plugin from the same repository.
