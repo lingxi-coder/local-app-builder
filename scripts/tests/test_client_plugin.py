@@ -11,7 +11,7 @@ import unittest
 REPO = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 GATE = os.path.join(REPO, "scripts/checks/check_client_plugin.py")
 COPIED = ["plugins/local-app-builder", ".agents", ".claude-plugin", ".lingxi-plugin",
-          "crates/plugins/lingxi-local-app/.lingxi-plugin", "crates/plugins/lingxi-local-app/.mcp.json", "crates/local-app-builder-cli/src/mcp_backend.rs",
+          "crates/plugins/lingxi-local-app/.lingxi-plugin", "crates/local-app-builder-cli/src/mcp_backend.rs",
           "crates/local-app-builder-service/src/tool_names.rs"]
 
 
@@ -55,10 +55,6 @@ class ClientPlugin(unittest.TestCase):
         result = self.gate()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_a_lingxi_plugin_without_the_server_declaration_is_rejected(self):
-        self.edit_json("crates/plugins/lingxi-local-app/.mcp.json", lambda d: d["mcpServers"]["local-app-builder"].update(args=["serve"]))
-        self.rejects("must be the same document as plugins/local-app-builder/.mcp.json")
-
     def test_a_lingxi_marketplace_that_points_nowhere_is_rejected(self):
         self.edit_json(".lingxi-plugin/marketplace.json", lambda d: d["plugins"][0].update(source="./plugins/nowhere"))
         self.rejects(".lingxi-plugin/marketplace.json: expected one plugin `lingxi-local-app`")
@@ -71,14 +67,14 @@ class ClientPlugin(unittest.TestCase):
         self.edit_json("plugins/local-app-builder/plugin.json", lambda d: d.update(version="1.0", name="Local App"))
         self.rejects("not kebab-case", "not major.minor.patch")
 
-    def test_the_two_mcp_files_must_be_one_document(self):
-        self.edit_json("plugins/local-app-builder/.mcp.json", lambda d: d["mcpServers"]["local-app-builder"].update(args=["mcp", "--x"]))
-        self.rejects("mcp.json and .mcp.json differ")
-
-    def test_the_server_must_be_the_bare_command(self):
-        for rel in ("plugins/local-app-builder/mcp.json", "plugins/local-app-builder/.mcp.json"):
-            self.edit_json(rel, lambda d: d["mcpServers"]["local-app-builder"].update(command="${CLAUDE_PLUGIN_ROOT}/bin/local-app-builder"))
-        self.rejects("must be {type: stdio, command: local-app-builder, args: [mcp]}", "placeholder")
+    def test_an_mcp_config_in_either_plugin_tree_is_rejected(self):
+        for rel in ("plugins/local-app-builder/mcp.json", "plugins/local-app-builder/.mcp.json",
+                    "crates/plugins/lingxi-local-app/.mcp.json"):
+            os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
+            with open(self.path(rel), "w", encoding="utf-8") as f:
+                f.write("{}\n")
+            self.rejects(rel + ": the plugin does not carry an MCP config")
+            os.remove(self.path(rel))
 
     def test_a_marketplace_that_points_elsewhere_is_rejected(self):
         self.edit_json(".claude-plugin/marketplace.json", lambda d: d["plugins"][0].update(source="./plugins/other"))

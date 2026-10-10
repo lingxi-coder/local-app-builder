@@ -5,8 +5,8 @@ description: Use when the Local App tools are missing or the local-app-builder M
 
 # Local App setup
 
-The plugin starts the `local-app-builder` command (`local-app-builder mcp`). It is installed separately and must be on the `PATH` of
-the program that runs the MCP server. Nothing in this plugin installs it.
+The plugin's tools come from the `local-app-builder` MCP server (`local-app-builder mcp`). The plugin does not declare or install
+it: add it through the client's own MCP flow, with the `local-app-builder` command on the `PATH` of the program that runs it.
 
 ## Check the machine
 

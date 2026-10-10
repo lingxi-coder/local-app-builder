@@ -1,6 +1,6 @@
 {
   "name": "local-app-builder",
-  "description": "Local App Builder plugin for LingXi: skills, agents, workflows and the local-app-builder MCP server.",
+  "description": "Local App Builder plugin for LingXi: skills, agents and workflows.",
   "owner": {
     "name": "Local App"
   },
@@ -8,7 +8,7 @@
     {
       "name": "lingxi-local-app",
       "source": "./crates/plugins/lingxi-local-app",
-      "description": "Create, update, run, verify and expose Local Apps through the local-app-builder MCP server."
+      "description": "Create, update, run, verify and expose Local Apps with the local-app-builder MCP server."
     }
   ]
 }

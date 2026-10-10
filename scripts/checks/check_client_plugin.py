@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Rules for the Codex / Claude Code plugin in plugins/local-app-builder. Offline, no client needed.
 
-The two clients read different files from one tree (P1, experiments 6 and 7): Claude reads `.claude-plugin/plugin.json`
-and `.mcp.json`; Codex reads the root `plugin.json` and `mcp.json`. Each is blind to the other's, so nothing stops them
+The two clients read different files from one tree (P1, experiments 6 and 7): Claude reads `.claude-plugin/plugin.json`;
+Codex reads the root `plugin.json`. Each is blind to the other's, so nothing stops them
 drifting apart except this gate.
 
   C1  both manifests are JSON, kebab-case name, a semver version and a description, and agree on all three
-  C2  `mcp.json` and `.mcp.json` are the same document: one server `local-app-builder`, the bare command `local-app-builder` with
-      args `["mcp"]` (no placeholder, which Claude does not expand in the shared form), type `stdio`
+  C2  neither plugin tree carries an MCP config (`mcp.json`, `.mcp.json`): the server is installed through the client's own MCP flow
   C3  both marketplace files list the plugin under the same name, from a `./plugins/local-app-builder` that exists
   C4  every skill is `skills/<dir>/SKILL.md` with frontmatter `name` equal to the directory and a description
   C5  no skill uses a `${...}` placeholder (Codex substitutes none, Claude only its own) or names the engine's product
@@ -15,7 +14,7 @@ drifting apart except this gate.
   C6  every `LocalApp…` tool a skill names is one the server offers today (the CLI's SERVED_READ and SERVED_WRITE
       operations, through the service's tool table), and every offered tool is named in the `local-app-builder` skill, so the model is told about it
   C7  the LingXi plugin tree (`crates/plugins/lingxi-local-app`) is installable on its own: `.lingxi-plugin/marketplace.json` lists it
-      from a path that exists, its manifest is MIT like the repository, and its `.mcp.json` is the same document as the desktop plugin's
+      from a path that exists, and its manifest is MIT like the repository
 """
 import json
 import os
@@ -108,23 +107,9 @@ def check(root):
                                 % (field, codex.get(field), claude.get(field)))
 
     # C2
-    codex_mcp = read_json(root, PLUGIN + "/mcp.json", problems)
-    claude_mcp = read_json(root, PLUGIN + "/.mcp.json", problems)
-    if codex_mcp is not None and claude_mcp is not None and codex_mcp != claude_mcp:
-        problems.append("mcp.json and .mcp.json differ — each client reads only one of them, so they must be the same document")
-    for label, doc in (("mcp.json", codex_mcp), (".mcp.json", claude_mcp)):
-        if doc is None:
-            continue
-        servers = doc.get("mcpServers")
-        if not isinstance(servers, dict) or list(servers) != ["local-app-builder"]:
-            problems.append("%s: expected exactly one server, `local-app-builder`" % label)
-            continue
-        server = servers["local-app-builder"]
-        if server.get("command") != "local-app-builder" or server.get("args") != ["mcp"] or server.get("type") != "stdio":
-            problems.append("%s: the server must be {type: stdio, command: local-app-builder, args: [mcp]}, got %s"
-                            % (label, json.dumps(server, sort_keys=True)))
-        if "${" in json.dumps(server):
-            problems.append("%s: a placeholder is not expanded the same way by both clients; use the bare command" % label)
+    for rel in (PLUGIN + "/mcp.json", PLUGIN + "/.mcp.json", LINGXI_PLUGIN + "/.mcp.json"):
+        if os.path.exists(os.path.join(root, rel)):
+            problems.append("%s: the plugin does not carry an MCP config; the server is installed through the client's MCP flow" % rel)
 
     # C3
     for rel, entries_of in ((".agents/plugins/marketplace.json", lambda d: [(p.get("name"), (p.get("source") or {}).get("path")) for p in d.get("plugins", [])]),
@@ -148,10 +133,6 @@ def check(root):
             problems.append("%s/.lingxi-plugin/plugin.json: name must be lingxi-local-app (the workflow ids are `lingxi-local-app:<script>`)" % LINGXI_PLUGIN)
         if lingxi_manifest.get("license") != "MIT":
             problems.append("%s/.lingxi-plugin/plugin.json: license must be MIT like the repository, got %r" % (LINGXI_PLUGIN, lingxi_manifest.get("license")))
-    lingxi_mcp = read_json(root, LINGXI_PLUGIN + "/.mcp.json", problems)
-    if lingxi_mcp is not None and claude_mcp is not None and lingxi_mcp != claude_mcp:
-        problems.append("%s/.mcp.json must be the same document as %s/.mcp.json" % (LINGXI_PLUGIN, PLUGIN))
-
     if not os.path.isdir(plugin_dir):
         problems.append("%s does not exist" % PLUGIN)
         return problems
@@ -212,7 +193,7 @@ def main():
         for p in problems:
             sys.stderr.write("  - " + p + "\n")
         return 1
-    print("check-client-plugin: OK — manifests, MCP configs, marketplaces and skills agree")
+    print("check-client-plugin: OK — manifests, marketplaces and skills agree")
     return 0
 
 

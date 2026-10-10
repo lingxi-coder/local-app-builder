@@ -9,10 +9,10 @@ template catalogue.
 
 **Status.** Two things ship from here, and an app that wants Local Apps takes both without linking either:
 
-* **the plugin**, installed from this repository as a marketplace: skills, agents, workflows, schemas and the `.mcp.json` that
-  declares the server. For Claude Code and Codex it is `plugins/local-app-builder` (listed in `.claude-plugin/marketplace.json` and
+* **the plugin**, installed from this repository as a marketplace: skills, agents, workflows and schemas. The plugin declares no
+  MCP server; the client's own MCP flow installs it. For Claude Code and Codex it is `plugins/local-app-builder` (listed in `.claude-plugin/marketplace.json` and
   `.agents/plugins/marketplace.json`); for LingXi it is `crates/plugins/lingxi-local-app` (listed in `.lingxi-plugin/marketplace.json`).
-  `scripts/checks/check-client-plugin.sh` keeps the manifests, marketplaces and `.mcp.json` files in agreement.
+  `scripts/checks/check-client-plugin.sh` keeps the manifests and marketplaces in agreement and the plugin trees free of MCP configs.
 * **the MCP server**, the `local-app-builder` binary (`cargo build --release -p local-app-builder-cli`), started by the client as
   `local-app-builder mcp` over stdio. It is a separate download, not a library: no application links `local-app-builder-service`.
 
