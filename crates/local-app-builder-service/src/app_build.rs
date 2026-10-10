@@ -407,7 +407,7 @@ pub fn detect_build_target(layout: &AppLayout) -> Result<LocalAppBuildTarget, Ap
         (false, None, None) => Err(AppError::InvalidRequest(
             "this app has no runtime profile yet — it was created as an empty shell and nothing \
              has been scaffolded into its workspace. Confirm the app name and runtime profile \
-             with the user, then get the guided create flow lingxi-local-app:create-local-app \
+             with the user, then get the guided create flow local-app-builder:create-local-app \
              running — with the Skill tool yourself if you hold it, otherwise by asking the \
              calling agent or the user to run it — which lands LocalAppScaffold with the name, \
              brief and shape. Do not call LocalAppScaffold directly yourself. Building only \
@@ -4849,7 +4849,7 @@ mod tests {
     fn the_locked_bridge_exposes_the_native_wire_contract() {
         let bridge = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/react-dom/r4/lib/lingxi-bridge.js"
+            "/../plugins/local-app-builder/assets/templates/react-dom/r4/lib/lingxi-bridge.js"
         ));
         for anchor in [
             "records[].document",
@@ -4902,15 +4902,15 @@ mod tests {
     fn platform_adapter_declares_distinct_phone_and_tablet_presentations() {
         let adapter = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/react-dom/r4/lib/platform-adapter.js"
+            "/../plugins/local-app-builder/assets/templates/react-dom/r4/lib/platform-adapter.js"
         ));
         let foundation = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/react-dom/r4/styles/foundation.css"
+            "/../plugins/local-app-builder/assets/templates/react-dom/r4/styles/foundation.css"
         ));
         let vite_config = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/react-dom/r4/vite.config.mjs"
+            "/../plugins/local-app-builder/assets/templates/react-dom/r4/vite.config.mjs"
         ));
         for marker in [
             "ios:iphone",

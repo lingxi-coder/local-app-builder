@@ -16,30 +16,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// The plan the `local-app-builder-create` skill shows a model. The tests use it as it stands, so the example cannot rot.
-const CREATE_SKILL: &str =
-    include_str!("../../../plugins/local-app-builder/skills/local-app-builder-create/SKILL.md");
-
-fn skill_plan() -> String {
-    let start = CREATE_SKILL
-        .find("<!-- plan-example:start -->")
-        .expect("start marker");
-    let end = CREATE_SKILL
-        .find("<!-- plan-example:end -->")
-        .expect("end marker");
-    let block = &CREATE_SKILL[start..end];
-    let lines: Vec<&str> = block.lines().collect();
-    // Drop the marker line and the four-backtick fence around the example.
-    let open = lines
-        .iter()
-        .position(|l| l.starts_with("````"))
-        .expect("outer fence");
-    let close = lines
-        .iter()
-        .rposition(|l| l.starts_with("````"))
-        .expect("outer fence end");
-    lines[open + 1..close].join("\n") + "\n"
-}
+/// The plan a model writes before it calls prepare: an example app with its `authoring-spec` block.
+const PLAN: &str = include_str!("fixtures/water-tracker-plan.md");
 
 /// What the person does when asked.
 #[derive(Clone, Copy, PartialEq)]
@@ -192,23 +170,22 @@ fn app_id(structured: &Value) -> String {
 fn write_plan(dir: &Path, template: &str) -> std::path::PathBuf {
     assert_eq!(
         template, "react-dom-r4",
-        "the skill's example is the react-dom-r4 plan"
+        "the example is the react-dom-r4 plan"
     );
     let path = dir.join("plan.md");
-    std::fs::write(&path, skill_plan()).unwrap();
+    std::fs::write(&path, PLAN).unwrap();
     path
 }
 
 #[test]
-fn the_plan_the_skill_shows_is_one_the_server_accepts() {
-    let plan = skill_plan();
-    assert!(plan.starts_with("# Water tracker"), "{plan}");
-    let block = parse_authoring_block(&plan)
+fn the_example_plan_is_one_the_server_accepts() {
+    assert!(PLAN.starts_with("# Water tracker"), "{PLAN}");
+    let block = parse_authoring_block(PLAN)
         .expect("the example parses")
         .expect("the example carries an authoring block");
     drop(block);
     // And it names a template the catalog has.
-    let catalog = include_str!("../../plugins/lingxi-local-app/assets/templates/catalog.json");
+    let catalog = include_str!("../../plugins/local-app-builder/assets/templates/catalog.json");
     assert!(catalog.contains("\"react-dom-r4\""));
 }
 

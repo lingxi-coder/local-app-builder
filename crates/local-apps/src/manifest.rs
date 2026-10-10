@@ -392,12 +392,12 @@ pub struct AppTemplateOrigin {
 }
 
 impl AppTemplateOrigin {
-    pub const BUILTIN_PLUGIN_ID: &'static str = "lingxi-local-app@builtin";
+    pub const BUILTIN_PLUGIN_ID: &'static str = "local-app-builder@builtin";
 
     fn validate(&self) -> Result<(), AppError> {
         if self.plugin_id != Self::BUILTIN_PLUGIN_ID {
             return Err(AppError::InvalidRequest(
-                "templateOrigin pluginId must be lingxi-local-app@builtin".into(),
+                "templateOrigin pluginId must be local-app-builder@builtin".into(),
             ));
         }
         for (label, value) in [

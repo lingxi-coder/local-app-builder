@@ -1,8 +1,0 @@
-{
-  "name": "local-app-builder",
-  "version": "0.1.0",
-  "description": "Create, build, preview and inspect Local Apps on this machine from Codex.",
-  "author": { "name": "Local App Builder" },
-  "license": "MIT OR Apache-2.0",
-  "keywords": ["local-app-builder"]
-}

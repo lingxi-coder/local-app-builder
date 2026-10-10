@@ -121,7 +121,7 @@ async fn the_pinned_toolchain_installs_and_builds_a_real_template_in_the_sandbox
     let _ = std::fs::remove_dir_all(&project);
     copy_dir(
         &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../plugins/lingxi-local-app/assets/templates/react-dom/r4"),
+            .join("../plugins/local-app-builder/assets/templates/react-dom/r4"),
         &project,
     );
     let state = format!("{PROJECT}/.lingxi-build-state");

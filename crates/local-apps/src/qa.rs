@@ -5379,7 +5379,7 @@ mod tests {
         assert!(dto.identity.validate(&layout(&root)).is_ok());
         assert_eq!(serde_json::to_value(dto).unwrap(), fixture);
         let schema: Value = serde_json::from_str(include_str!(
-            "../../plugins/lingxi-local-app/schemas/qa-report.schema.json"
+            "../../plugins/local-app-builder/schemas/qa-report.schema.json"
         ))
         .unwrap();
         let required = schema["required"]

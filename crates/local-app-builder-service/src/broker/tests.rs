@@ -20,11 +20,11 @@ const KNOWN_NON_LOCAL_APP_TOOL_NAMES: &[&str] = &["AskUserQuestion", "Skill", "W
 /// and skills are allowed to name.
 #[cfg(test)]
 const KNOWN_PLUGIN_QUALIFIED_IDS: &[&str] = &[
-    "lingxi-local-app:apple-design",
-    "lingxi-local-app:create-local-app",
-    "lingxi-local-app:local-app-build",
-    "lingxi-local-app:local-app-mcp-authoring",
-    "lingxi-local-app:local-app-use-test",
+    "local-app-builder:apple-design",
+    "local-app-builder:create-local-app",
+    "local-app-builder:local-app-build",
+    "local-app-builder:local-app-mcp-authoring",
+    "local-app-builder:local-app-use-test",
 ];
 
 /// Assert that every backticked span in `contract` that is SHAPED like a tool
@@ -4201,7 +4201,7 @@ async fn guided_shell_delegates_without_technical_or_mcp_prerequisites() {
 
     assert!(
         guided.contains("Immediately use the `Skill` tool")
-            && guided.contains("lingxi-local-app:create-local-app"),
+            && guided.contains("local-app-builder:create-local-app"),
         "the shell must immediately enter the plugin-qualified create coordinator: {guided}"
     );
     assert!(
@@ -8576,7 +8576,7 @@ async fn workspace_contracts_name_no_local_app_tool_outside_local_app_tools() {
          runtime confirmation tool: {guided}"
     );
     assert!(
-        guided.contains("lingxi-local-app:create-local-app"),
+        guided.contains("local-app-builder:create-local-app"),
         "the guided contract must name the create skill by its exact, \
          plugin-qualified id — the bare name does not resolve: {guided}"
     );
@@ -8613,7 +8613,7 @@ async fn workspace_contracts_name_no_local_app_tool_outside_local_app_tools() {
 /// scanning one scans both.
 #[test]
 fn shipped_prompt_files_name_no_tool_outside_local_app_tools() {
-    let skill = include_str!("../../../plugins/lingxi-local-app/skills/create-local-app/SKILL.md");
+    let skill = include_str!("../../../plugins/local-app-builder/skills/create-local-app/SKILL.md");
     // Vacuity guard: a gate that scans the wrong file, or a file that
     // stopped naming tools at all, must not read as "all clear".
     assert!(
@@ -8661,7 +8661,7 @@ fn next_step_guidance_names_no_tool_outside_local_app_tools() {
     assert_only_real_local_app_tool_tokens(&create, "create_next_step_guidance");
     assert_only_real_local_app_tool_tokens(&scaffold, "scaffold_next_step_guidance");
     // And the backtick scanner on top for the create string, because it is
-    // the one that carries `lingxi-local-app:create-local-app` — a
+    // the one that carries `local-app-builder:create-local-app` — a
     // plugin-qualified id the guidance itself says is the only spelling
     // that resolves, so a typo in it is silently unrecoverable for the
     // model.
@@ -8710,7 +8710,7 @@ fn the_tool_name_scanner_actually_rejects_the_shapes_it_exists_to_catch() {
     // meaningless because the scanner rejects everything.
     assert_only_real_tool_names(
         "call `LocalAppBuild {\"app_id\":\"x\"}`, ask with `AskUserQuestion`, then use \
-         the `Skill` tool for `lingxi-local-app:create-local-app`.",
+         the `Skill` tool for `local-app-builder:create-local-app`.",
         "the positive control",
     );
 
@@ -8726,8 +8726,8 @@ fn the_tool_name_scanner_actually_rejects_the_shapes_it_exists_to_catch() {
         // Rule 3: a plugin-qualified id the old tokeniser truncated at the
         // first `-`, so a typo in it could never be seen.
         (
-            "start `lingxi-local-app:create-local-application` to continue",
-            "lingxi-local-app:create-local-application",
+            "start `local-app-builder:create-local-application` to continue",
+            "local-app-builder:create-local-application",
         ),
         // The balance guard.
         (
@@ -10248,18 +10248,18 @@ async fn dependency_staging_preserves_the_pinned_widget_importer() {
 #[test]
 fn pnpm_lock_documents_preserve_legacy_and_reject_ambiguous_graphs() {
     let legacy = include_bytes!(
-        "../../../plugins/lingxi-local-app/assets/templates/react-dom/r4/pnpm-lock.yaml"
+        "../../../plugins/local-app-builder/assets/templates/react-dom/r4/pnpm-lock.yaml"
     );
     let legacy_package = include_bytes!(
-        "../../../plugins/lingxi-local-app/assets/templates/react-dom/r4/package.json"
+        "../../../plugins/local-app-builder/assets/templates/react-dom/r4/package.json"
     );
     validate_resolved_dependency_lock(legacy_package, legacy)
         .expect("pnpm 11 single-document lock");
     let current = include_str!(
-        "../../../plugins/lingxi-local-app/assets/templates/react-dom/r4/pnpm-lock.yaml"
+        "../../../plugins/local-app-builder/assets/templates/react-dom/r4/pnpm-lock.yaml"
     );
     let package = include_bytes!(
-        "../../../plugins/lingxi-local-app/assets/templates/react-dom/r4/package.json"
+        "../../../plugins/local-app-builder/assets/templates/react-dom/r4/package.json"
     );
     validate_resolved_dependency_lock(package, current.as_bytes())
         .expect("pnpm 12 configuration plus dependency documents");

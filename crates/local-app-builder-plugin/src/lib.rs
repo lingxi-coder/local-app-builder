@@ -1,6 +1,6 @@
 //! Where the checked-in Local App plugin tree is, for the consumers that need its files.
 //!
-//! The tree (`crates/plugins/lingxi-local-app`) is data, not Rust. A host that compiles it into
+//! The tree (`crates/plugins/local-app-builder`) is data, not Rust. A host that compiles it into
 //! its binary (a build script packing the bundle) or validates it in a test needs a path, and a
 //! relative path out of the consumer's own crate stops working the day the tree lives in another
 //! repository. The path is resolved from this crate's manifest instead, so it follows whichever
@@ -18,7 +18,7 @@ use std::path::Path;
 pub fn root() -> &'static Path {
     Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../plugins/lingxi-local-app"
+        "/../plugins/local-app-builder"
     ))
 }
 
@@ -27,7 +27,7 @@ pub fn root() -> &'static Path {
 pub fn inventory_path() -> &'static Path {
     Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../plugins/lingxi-local-app.inventory.txt"
+        "/../plugins/local-app-builder.inventory.txt"
     ))
 }
 
@@ -38,38 +38,38 @@ pub fn inventory_path() -> &'static Path {
 /// workflow that does not exist. A host keeps its own registry of these ids and tests it against this list; a service tests
 /// that its prose names none of them.
 pub const WORKFLOW_IDS: [&str; 3] = [
-    "lingxi-local-app:local-app-build",
-    "lingxi-local-app:local-app-use-test",
-    "lingxi-local-app:local-app-mcp-authoring",
+    "local-app-builder:local-app-build",
+    "local-app-builder:local-app-use-test",
+    "local-app-builder:local-app-mcp-authoring",
 ];
 
 /// JSON Schemas the plugin owns.
 pub mod schemas {
     /// `authoring-spec.schema.json`.
     pub const AUTHORING_SPEC: &str =
-        include_str!("../../plugins/lingxi-local-app/schemas/authoring-spec.schema.json");
+        include_str!("../../plugins/local-app-builder/schemas/authoring-spec.schema.json");
     /// `qa-report.schema.json`.
     pub const QA_REPORT: &str =
-        include_str!("../../plugins/lingxi-local-app/schemas/qa-report.schema.json");
+        include_str!("../../plugins/local-app-builder/schemas/qa-report.schema.json");
     /// `use-test-report.schema.json`.
     pub const USE_TEST_REPORT: &str =
-        include_str!("../../plugins/lingxi-local-app/schemas/use-test-report.schema.json");
+        include_str!("../../plugins/local-app-builder/schemas/use-test-report.schema.json");
     /// `mcp-proposal.schema.json`.
     pub const MCP_PROPOSAL: &str =
-        include_str!("../../plugins/lingxi-local-app/schemas/mcp-proposal.schema.json");
+        include_str!("../../plugins/local-app-builder/schemas/mcp-proposal.schema.json");
     /// `workflow-agent-results.schema.json`.
     pub const WORKFLOW_AGENT_RESULTS: &str =
-        include_str!("../../plugins/lingxi-local-app/schemas/workflow-agent-results.schema.json");
+        include_str!("../../plugins/local-app-builder/schemas/workflow-agent-results.schema.json");
 }
 
 /// Workflow scripts the plugin ships.
 pub mod workflows {
     /// `local-app-use-test.js`.
     pub const USE_TEST: &str =
-        include_str!("../../plugins/lingxi-local-app/workflows/local-app-use-test.js");
+        include_str!("../../plugins/local-app-builder/workflows/local-app-use-test.js");
     /// `local-app-mcp-authoring.js`.
     pub const MCP_AUTHORING: &str =
-        include_str!("../../plugins/lingxi-local-app/workflows/local-app-mcp-authoring.js");
+        include_str!("../../plugins/local-app-builder/workflows/local-app-mcp-authoring.js");
 }
 
 /// Checked-in examples of the contract that the host's own tests validate its workflow scripts
@@ -118,14 +118,14 @@ mod tests {
         assert_eq!(WORKFLOW_IDS.len(), 3);
         assert!(WORKFLOW_IDS
             .iter()
-            .all(|id| id.starts_with("lingxi-local-app:")));
+            .all(|id| id.starts_with("local-app-builder:")));
     }
 
     /// An `include_str!` that names the wrong (but existing) file would still compile; compare each
     /// constant with the file its name promises.
     #[test]
     fn every_embedded_constant_is_the_file_its_name_promises() {
-        let plugin = "../plugins/lingxi-local-app";
+        let plugin = "../plugins/local-app-builder";
         let fixtures = "../local-apps/tests/fixtures";
         for (embedded, path) in [
             (

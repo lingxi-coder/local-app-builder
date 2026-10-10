@@ -894,7 +894,7 @@ pub fn canonical_cwd_string(path: &std::path::Path) -> String {
 /// response). Handing off to it is what puts the agent in the right cwd with the
 /// right `LINGXI.md` auto-loaded.
 pub(crate) fn create_next_step_guidance() -> String {
-    "The app now exists as an EMPTY shell, and this conversation is not rooted in it. Stop here: do not write source, do not call LocalAppBuild, and do not start a build workflow from this conversation — its working directory is not the app's workspace, so anything written here lands outside the app. The app has its own workspace and its own session (init_session_id in this result); continue there, where the guided workspace contract explains the interview and hands off to the `lingxi-local-app:create-local-app` skill (that exact, plugin-qualified name is how it is registered; the bare name does not resolve). Do not recreate the app, do not run a package-manager scaffold command, and do not install dependencies yet: the interview, a native create confirmation, and only then LocalAppScaffold happen first — never call LocalAppScaffold directly from this step.".into()
+    "The app now exists as an EMPTY shell, and this conversation is not rooted in it. Stop here: do not write source, do not call LocalAppBuild, and do not start a build workflow from this conversation — its working directory is not the app's workspace, so anything written here lands outside the app. The app has its own workspace and its own session (init_session_id in this result); continue there, where the guided workspace contract explains the interview and hands off to the `local-app-builder:create-local-app` skill (that exact, plugin-qualified name is how it is registered; the bare name does not resolve). Do not recreate the app, do not run a package-manager scaffold command, and do not install dependencies yet: the interview, a native create confirmation, and only then LocalAppScaffold happen first — never call LocalAppScaffold directly from this step.".into()
 }
 
 struct LocalAppsRuntimeConfiguration {
@@ -3083,7 +3083,7 @@ fn guided_workspace_contract(record: &local_apps::AppRecord) -> String {
          manifest, UI, data and background tool refuses an app with no shape — that refusal is \
          the contract, not a transient failure.\n\n\
          Immediately use the `Skill` tool to start \
-         `lingxi-local-app:create-local-app` (the plugin-qualified name is required). That skill \
+         `local-app-builder:create-local-app` (the plugin-qualified name is required). That skill \
          owns the whole flow: it plans the app with the user, and the Host prepares this \
          workspace from the plan the user approves. Do not run a separate questionnaire here, \
          and do not call `LocalAppScaffold` directly.\n\n\

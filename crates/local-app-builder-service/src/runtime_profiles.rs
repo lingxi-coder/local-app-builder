@@ -61,7 +61,7 @@ macro_rules! profile_file {
             $path,
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../plugins/lingxi-local-app/assets/templates/",
+                "/../plugins/local-app-builder/assets/templates/",
                 $family,
                 "/r4/",
                 $path
@@ -75,7 +75,7 @@ macro_rules! widget_file {
             concat!("app/mcp-widget/", $path),
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../plugins/lingxi-local-app/assets/templates/shared/mcp-widget/r4/",
+                "/../plugins/local-app-builder/assets/templates/shared/mcp-widget/r4/",
                 $path
             )) as &[u8],
         )
@@ -871,7 +871,7 @@ mod tests {
     fn plugin_catalog_contract_digests_match_production_contracts() {
         let catalog: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/catalog.json"
+            "/../plugins/local-app-builder/assets/templates/catalog.json"
         )))
         .expect("Plugin runtime profile catalog must be valid JSON");
         if let Err(mismatches) = validate_catalog_contracts(&catalog) {
@@ -886,7 +886,7 @@ mod tests {
     fn every_catalog_contract_digest_is_part_of_the_gate() {
         let catalog: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/catalog.json"
+            "/../plugins/local-app-builder/assets/templates/catalog.json"
         )))
         .expect("Plugin runtime profile catalog must be valid JSON");
         for contract in catalog_contracts() {
@@ -953,7 +953,7 @@ mod tests {
             assert_eq!(contract.revision, 4);
             let family = contract.family.as_str().replace('_', "-");
             let template = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../plugins/lingxi-local-app/assets/templates")
+                .join("../plugins/local-app-builder/assets/templates")
                 .join(family)
                 .join("r4");
             for (path, bytes) in contract.managed_files.iter().chain(contract.editable_files) {
@@ -1053,7 +1053,7 @@ mod tests {
     fn engine_templates_import_only_their_declared_runtime() {
         let phaser_source = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/phaser-2d/r4/app/screens/game-screen.jsx"
+            "/../plugins/local-app-builder/assets/templates/phaser-2d/r4/app/screens/game-screen.jsx"
         ));
         let phaser_runtime = String::from_utf8_lossy(
             managed_file_bytes(&PHASER_2D_R4, "lib/phaser-runtime.js")
@@ -1089,7 +1089,7 @@ mod tests {
 
         let babylon_source = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/babylon-3d/r4/app/screens/game-screen.jsx"
+            "/../plugins/local-app-builder/assets/templates/babylon-3d/r4/app/screens/game-screen.jsx"
         ));
         let babylon_runtime = String::from_utf8_lossy(
             managed_file_bytes(&BABYLON_3D_R4, "lib/babylon-runtime.js")

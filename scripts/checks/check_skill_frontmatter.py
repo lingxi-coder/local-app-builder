@@ -45,13 +45,13 @@ MAX_DESCRIPTION_COLUMNS = 180
 
 # 门要扫的 skill 根目录，相对仓库根。
 SKILL_ROOTS = [
-    "crates/plugins/lingxi-local-app/skills",
+    "crates/plugins/local-app-builder/skills",
 ]
 
 # Agent 用同一套 frontmatter 判据,但形状不同:agent 是 `agents/<name>.md`
 # 单文件,identity 来自**文件名**;skill 是 `skills/<name>/SKILL.md`,identity
 # 来自**目录名**。两者都由 `plugin/src/discovery.rs` 的 `glob_md()` 递归发现。
-AGENT_ROOTS = ["crates/plugins/lingxi-local-app/agents"]
+AGENT_ROOTS = ["crates/plugins/local-app-builder/agents"]
 
 # Prose that asserts a tool does not exist. Matched per SENTENCE against the
 # agent's own granted tool names, so "no `LocalAppActOnUi` — that is operator's

@@ -15,7 +15,7 @@ ROOT = REPO
 CORE = ROOT / "crates" / "local-apps" / "src"
 # The id grammar has its own dependency-free crate; `local-apps` re-exports it.
 CONTRACTS = ROOT / "crates" / "local-app-builder-contracts" / "src"
-WORKFLOW = ROOT / "crates" / "plugins" / "lingxi-local-app" / "workflows" / "local-app-mcp-authoring.js"
+WORKFLOW = ROOT / "crates" / "plugins" / "local-app-builder" / "workflows" / "local-app-mcp-authoring.js"
 
 
 def fail(message: str) -> None:

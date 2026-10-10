@@ -356,7 +356,7 @@ pub fn validate_and_journal(
     let selection = ValidatedTemplateSelection {
         app_id: app_id.to_string(),
         workflow_run_id: workflow_run_id.to_string(),
-        plugin_name: "lingxi-local-app@builtin".into(),
+        plugin_name: "local-app-builder@builtin".into(),
         plugin_bundle_sha256: bundle.bundle_sha256().into(),
         catalog_digest: catalog.catalog_digest.clone(),
         template_id: template.template_id.clone(),
@@ -469,7 +469,7 @@ pub fn journal_plan_selection(
     let selection = ValidatedTemplateSelection {
         app_id: app_id.to_string(),
         workflow_run_id: execution_id.to_string(),
-        plugin_name: "lingxi-local-app@builtin".into(),
+        plugin_name: "local-app-builder@builtin".into(),
         plugin_bundle_sha256: bundle.bundle_sha256().into(),
         catalog_digest,
         template_id: template.template_id.clone(),
@@ -534,7 +534,7 @@ pub fn resolve_typed(
     if row.selection.catalog_digest != catalog.catalog_digest {
         return Err("catalog_stale: candidate was issued for an older catalog".into());
     }
-    if row.selection.plugin_name != "lingxi-local-app@builtin" {
+    if row.selection.plugin_name != "local-app-builder@builtin" {
         return Err("validated_selection_invalid: unexpected plugin identity".into());
     }
     if row.selection.plugin_bundle_sha256 != bundle.bundle_sha256() {

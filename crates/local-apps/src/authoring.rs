@@ -1207,7 +1207,7 @@ mod tests {
     #[test]
     fn authoring_schema_tracks_the_dto_canvas_and_required_list_shape() {
         let schema: Value = serde_json::from_str(include_str!(
-            "../../plugins/lingxi-local-app/schemas/authoring-spec.schema.json"
+            "../../plugins/local-app-builder/schemas/authoring-spec.schema.json"
         ))
         .unwrap();
         let design_required = schema["properties"]["design"]["required"]

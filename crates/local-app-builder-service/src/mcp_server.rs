@@ -313,7 +313,7 @@ pub type InitSessionDiscarder = dyn Fn(&local_apps::AppRecord, &str) -> bool + S
 /// local-apps MCP server is connected unconditionally at bootstrap
 /// (`disabled: false, always_load: true`) and `set_builtin_plugin_enabled`
 /// only calls `PluginManager::disable`, which unloads the plugin's components
-/// (the `lingxi-local-app:create-local-app` skill the create flow hands off
+/// (the `local-app-builder:create-local-app` skill the create flow hands off
 /// to) and leaves this transport connected and listed. So the same question
 /// has to be asked INSIDE the create branch, through this probe.
 ///
@@ -2678,7 +2678,7 @@ impl LocalAppsMcpTransport {
                         return Ok(Self::tool_error(format!(
                             "{SHELL_GATE_CODE}: app `{app_id}` has no shape yet. \
                              Confirm what the user wants first, then get the guided create flow \
-                             `lingxi-local-app:create-local-app` (that exact, plugin-qualified \
+                             `local-app-builder:create-local-app` (that exact, plugin-qualified \
                              name; the bare name does not resolve) running — with the `Skill` \
                              tool yourself if you hold it, otherwise by asking the calling agent \
                              or the user to run it. It raises one native confirmation and only \
@@ -2895,7 +2895,7 @@ impl LocalAppsMcpTransport {
                 let name = input.get("name").and_then(Value::as_str);
                 if input.get("runtime_profile").is_some() || input.get("surface").is_some() {
                     return Ok(Self::tool_error(
-                        "create no longer accepts runtime_profile or surface; create the shell first, then let the `lingxi-local-app:create-local-app` skill (that exact plugin-qualified name; the bare name does not resolve) run its native create confirmation and call scaffold with the receipt it returns".to_string(),
+                        "create no longer accepts runtime_profile or surface; create the shell first, then let the `local-app-builder:create-local-app` skill (that exact plugin-qualified name; the bare name does not resolve) run its native create confirmation and call scaffold with the receipt it returns".to_string(),
                     ));
                 }
                 // The origin conversation is ENGINE-injected (the live session

@@ -7,14 +7,9 @@ It was developed inside `harness-runtime` (LingXi's engine) and extracted from i
 on any product repository: `scripts/checks/check-deps.sh` holds the graph to that, and `check-contract-digests.sh` pins the
 template catalogue.
 
-**Status.** Two things ship from here, and an app that wants Local Apps takes both without linking either:
-
-* **the plugin**, installed from this repository as a marketplace: skills, agents, workflows and schemas. The plugin declares no
-  MCP server; the client's own MCP flow installs it. For Claude Code and Codex it is `plugins/local-app-builder` (listed in `.claude-plugin/marketplace.json` and
-  `.agents/plugins/marketplace.json`); for LingXi it is `crates/plugins/lingxi-local-app` (listed in `.lingxi-plugin/marketplace.json`).
-  `scripts/checks/check-client-plugin.sh` keeps the manifests and marketplaces in agreement and the plugin trees free of MCP configs.
-* **the MCP server**, the `local-app-builder` binary (`cargo build --release -p local-app-builder-cli`), started by the client as
-  `local-app-builder mcp` over stdio. It is a separate download, not a library: no application links `local-app-builder-service`.
+**Status.** The plugin ships from here: `crates/plugins/local-app-builder`, listed in `.lingxi-plugin/marketplace.json` and installed
+through LingXi's plugin flow like any other plugin. It is skills, agents, workflows, schemas and template assets; it uses no MCP server.
+No application links `local-app-builder-service`.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
@@ -31,7 +26,7 @@ The repository is public (`lingxi-coder/local-app-builder`) and licensed under t
 | `crates/mcp-wire` | MCP wire types and the in-process transport traits |
 | `crates/rooted-fs` | rooted file operations: containment, atomic writes, file locks |
 | `crates/local-app-builder-plugin` | where the plugin tree is, and the schemas, workflow scripts and fixtures a host embeds |
-| `crates/plugins/lingxi-local-app` | the plugin tree: skills, agents, workflows, schemas, template assets (`.inventory.txt` beside it lists its files) |
+| `crates/plugins/local-app-builder` | the plugin tree: skills, agents, workflows, schemas, template assets (`.inventory.txt` beside it lists its files) |
 | `docs/local-apps` | design history (Chinese) and the performance baselines the core embeds |
 | `docs/runtime` | the runtime seed's pins, policy and SBOM (`local-app-runtime-{pins,policy}.json`, `sbom/`) |
 | `scripts/runtime` | build and attest the runtime seed: `verify-local-app-supply-chain.py`, `stage-local-app-runtime.py`, `build-local-app-node-modules.py`, `generate-local-app-sbom.py` |
@@ -57,6 +52,6 @@ verifier rejects what it should; it needs that checkout too, so it runs in the p
 
 Nothing links the service or the CLI. The engine (`harness-runtime`) and the LingXi apps contain no Local App code; they take
 four shared libraries from this repository by git pin (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`) and a person or a
-model installs the plugin and the server like any other. Claude Code and Codex install the same plugin from the same repository.
+model installs the plugin like any other.
 `mcp-wire` still holds `export` (the Local App conversation-export scope), which the engine's MCP registry names in its managed-server
 API; that is the one piece of Local App vocabulary left in the shared libraries.

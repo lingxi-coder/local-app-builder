@@ -6,9 +6,9 @@
   },
   "plugins": [
     {
-      "name": "lingxi-local-app",
-      "source": "./crates/plugins/lingxi-local-app",
-      "description": "Create, update, run, verify and expose Local Apps with the local-app-builder MCP server."
+      "name": "local-app-builder",
+      "source": "./crates/plugins/local-app-builder",
+      "description": "Create, update, run, verify and expose LingXi Local Apps through app-specific MCP tools."
     }
   ]
 }

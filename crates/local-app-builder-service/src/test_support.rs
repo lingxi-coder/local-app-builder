@@ -194,7 +194,7 @@ impl PluginBundle for CheckedInBundle {
     fn catalog_bytes(&self) -> &[u8] {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/lingxi-local-app/assets/templates/catalog.json"
+            "/../plugins/local-app-builder/assets/templates/catalog.json"
         ))
     }
 

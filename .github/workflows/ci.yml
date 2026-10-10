@@ -21,7 +21,6 @@ jobs:
           components: rustfmt, clippy
       - run: ./scripts/check-all.sh
       - run: python3 scripts/tests/test_dependency_rules.py
-      - run: python3 scripts/tests/test_client_plugin.py
       - run: node --test scripts/tests/test-local-app-r4-libs.mjs
 
   test:

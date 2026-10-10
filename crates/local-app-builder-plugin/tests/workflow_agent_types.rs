@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 /// r2-tests-honesty-005: nothing ties the `agentType: '<x>'` literals in the
 /// Local App plugin's workflow scripts to the shipped agent roster
-/// (`lingxi-local-app/agents/*.md`) -- neither `check-phase2-plugin.py`
+/// (`local-app-builder/agents/*.md`) -- neither `check-phase2-plugin.py`
 /// (which only checks the roster directory listing, never opens a workflow
 /// script) nor any Rust test. A workflow renamed to an `agentType` with no
 /// `.md` on disk passed every existing gate. This test closes the Rust half:

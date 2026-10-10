@@ -46,7 +46,7 @@ pub struct CatalogBundle {
 }
 
 const CATALOG: &[u8] =
-    include_bytes!("../../plugins/lingxi-local-app/assets/templates/catalog.json");
+    include_bytes!("../../plugins/local-app-builder/assets/templates/catalog.json");
 
 impl CatalogBundle {
     /// The bundle this build carries.

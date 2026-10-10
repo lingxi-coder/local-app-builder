@@ -20,9 +20,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 LOCAL_APP = REPO
 CODE = LOCAL_APP / "crates"
-PLUGIN = CODE / "plugins" / "lingxi-local-app"
+PLUGIN = CODE / "plugins" / "local-app-builder"
 MANIFEST = REPO / "docs" / "local-apps" / "harness" / "template-migration-manifest.json"
-INVENTORY = CODE / "plugins" / "lingxi-local-app.inventory.txt"
+INVENTORY = CODE / "plugins" / "local-app-builder.inventory.txt"
+MARKETPLACE = REPO / ".lingxi-plugin" / "marketplace.json"
 PROFILE_RS = CODE / "local-app-builder-service" / "src" / "runtime_profiles.rs"
 PERMISSIONS_RS = CODE / "local-apps" / "src" / "permissions.rs"
 PERMISSIONS_ASSET = CODE / "local-apps" / "assets" / "default-workspace-settings.local.json"
@@ -147,9 +148,10 @@ def read_json(path: Path, label: str) -> dict:
 def check_manifest_and_skills() -> tuple[dict, list[dict]]:
     manifest = read_json(PLUGIN / ".lingxi-plugin" / "plugin.json", "Plugin manifest")
     required = {
-        "name": "lingxi-local-app",
-        "displayName": "LingXi Local App",
+        "name": "local-app-builder",
+        "displayName": "Local App Builder",
         "version": "1.0.0",
+        "license": "MIT",
         "defaultEnabled": True,
         "skills": "./skills/",
         "agents": "./agents/",
@@ -160,6 +162,11 @@ def check_manifest_and_skills() -> tuple[dict, list[dict]]:
             fail(f"Plugin manifest {key!r} must be {expected!r}, got {manifest.get(key)!r}")
     if manifest.get("author", {}).get("name") != "LingXi":
         fail("Plugin manifest author.name must preserve the LingXi brand")
+    marketplace = read_json(MARKETPLACE, "Plugin marketplace")
+    listed = [(entry.get("name"), entry.get("source")) for entry in marketplace.get("plugins", [])]
+    expected_entry = (manifest["name"], "./" + PLUGIN.relative_to(REPO).as_posix())
+    if listed != [expected_entry]:
+        fail(f"Plugin marketplace must list exactly {expected_entry!r}, got {listed!r}")
 
     skill_root = PLUGIN / "skills"
     if not skill_root.is_dir():
@@ -356,7 +363,7 @@ def check_build_inventory_and_permissions() -> None:
     profile_text = PROFILE_RS.read_text(encoding="utf-8")
     if len(re.findall(r'profile_file!\(\s*"', profile_text)) < 112:
         fail("runtime_profiles.rs must retain at least the 112 current profile_file! call sites")
-    if "plugins/lingxi-local-app/assets/templates/" not in profile_text or "runtime-profiles" in profile_text:
+    if "plugins/local-app-builder/assets/templates/" not in profile_text or "runtime-profiles" in profile_text:
         fail("runtime profile production includes must point only at Plugin template assets")
 
 

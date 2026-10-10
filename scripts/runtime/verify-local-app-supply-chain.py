@@ -632,7 +632,7 @@ def validate_runtime_policy(repo: pathlib.Path) -> None:
 
 # The retired create flow launched the `local-app-build` plugin workflow, so
 # `skills/create-local-app/SKILL.md` used to carry a wrapped
-# `Workflow({"name":"lingxi-local-app:local-app-build","args":{"operation":
+# `Workflow({"name":"local-app-builder:local-app-build","args":{"operation":
 # "create"...}})` example with an `authoring_spec`/`mcp_intent` payload, and
 # this module pinned those exact tokens. `local-app-build.js` is DELETED and
 # create now runs as EnterPlanMode -> ExitPlanMode (the user's plan approval IS
@@ -730,7 +730,7 @@ def validate_create_skill(repo: pathlib.Path) -> None:
     # in the host repository's `skills/` and this check pinned the two together; with one copy
     # there is nothing left to diverge.
     skill_path = (
-        repo / "crates" / "plugins" / "lingxi-local-app" / "skills" / "create-local-app" / "SKILL.md"
+        repo / "crates" / "plugins" / "local-app-builder" / "skills" / "create-local-app" / "SKILL.md"
     )
     try:
         text = skill_path.read_text(encoding="utf-8")
@@ -792,7 +792,7 @@ def validate_create_skill(repo: pathlib.Path) -> None:
     validate_create_flow_contract(text)
 
     # A pin here required every `local-app-build` launch example in this skill
-    # to be written as a `Workflow({"name":"lingxi-local-app:local-app-build"...
+    # to be written as a `Workflow({"name":"local-app-builder:local-app-build"...
     # })` CALL carrying `authoring_spec`/`mcp_intent`, plus at least one example
     # that omitted `mcp_intent`. The skill no longer launches a plugin workflow
     # (see `validate_create_flow_contract`), so the examples and the check are
@@ -813,7 +813,7 @@ def validate_create_skill(repo: pathlib.Path) -> None:
     # shell's only channel to the model is that contract, so the interview could
     # not live in SKILL.md alone. `f81c57261` moved the interview deliberately:
     # the guided contract is now a thin identity/no-write guard that immediately
-    # enters `lingxi-local-app:create-local-app`, which is the channel. Its Rust
+    # enters `local-app-builder:create-local-app`, which is the channel. Its Rust
     # test `guided_shell_delegates_without_technical_or_mcp_prerequisites` pins
     # that delegation AND asserts `mcpSuggestions`/`LocalAppTemplateCatalog` are
     # absent from the guided contract -- the exact strings this pin demanded, so
@@ -827,7 +827,7 @@ def validate_create_skill(repo: pathlib.Path) -> None:
     # plugin workflow, so the main session owns plan -> prepare -> build ->
     # runtime and `validate_create_flow_contract` above pins those steps. Only
     # the still-live plugin workflows are checked here.
-    workflow_dir = repo / "crates" / "plugins" / "lingxi-local-app" / "workflows"
+    workflow_dir = repo / "crates" / "plugins" / "local-app-builder" / "workflows"
     try:
         mcp_authoring = (workflow_dir / "local-app-mcp-authoring.js").read_text(
             encoding="utf-8"
@@ -835,7 +835,7 @@ def validate_create_skill(repo: pathlib.Path) -> None:
     except OSError as exc:
         fail(f"missing plugin-owned local-app workflow: {exc}")
     mcp_authoring_tokens = {
-        "const WORKFLOW_ID = 'lingxi-local-app:local-app-mcp-authoring';",
+        "const WORKFLOW_ID = 'local-app-builder:local-app-mcp-authoring';",
         "HOST_CONTEXT_REQUIRED",
         "HOST_INVOCATION_CAPABILITY_REQUIRED",
         "LocalAppValidateMcpProposal",
@@ -893,8 +893,8 @@ def validate_create_skill(repo: pathlib.Path) -> None:
 
 def validate_agent_prompt_contracts(repo: pathlib.Path) -> None:
     """Pin least-privilege roles and Host-bound optimized orchestration."""
-    agents_dir = repo / "crates" / "plugins" / "lingxi-local-app" / "agents"
-    workflows_dir = repo / "crates" / "plugins" / "lingxi-local-app" / "workflows"
+    agents_dir = repo / "crates" / "plugins" / "local-app-builder" / "agents"
+    workflows_dir = repo / "crates" / "plugins" / "local-app-builder" / "workflows"
 
     verifier = (agents_dir / "verifier.md").read_text(encoding="utf-8")
     verifier_frontmatter = verifier.split("---", 2)[1]
@@ -1031,7 +1031,7 @@ COMPILED_PROFILE_MACRO_SOURCE = (
     "src",
     "runtime_profiles.rs",
 )
-COMPILED_PROFILE_ROOT_LITERAL = "/../plugins/lingxi-local-app/assets/templates/"
+COMPILED_PROFILE_ROOT_LITERAL = "/../plugins/local-app-builder/assets/templates/"
 # The five families embed more than 100 distinct files. The floor exists so a
 # regex that silently stops matching cannot report "0 files compared, all clear"
 # -- a zero-hit scan is not evidence.
@@ -1042,7 +1042,7 @@ COMPILED_PROFILE_CALL = re.compile(
 
 
 def compiled_runtime_profile_template_root(repo: pathlib.Path) -> pathlib.Path:
-    return repo / "crates" / "plugins" / "lingxi-local-app" / "assets" / "templates"
+    return repo / "crates" / "plugins" / "local-app-builder" / "assets" / "templates"
 
 
 def compiled_runtime_profile_files(repo: pathlib.Path) -> list[tuple[str, str]]:

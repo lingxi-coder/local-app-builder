@@ -14,7 +14,7 @@ SDK_ROOT="$(cd "$2" && pwd)"
 shift 2
 # The runtime-profile templates live in TWO on-disk copies: this one, which
 # every supply-chain assertion below is written against, and
-# crates/plugins/lingxi-local-app/assets/templates/, which is what
+# crates/plugins/local-app-builder/assets/templates/, which is what
 # `profile_file!` actually `include_bytes!`es into the engine. They are held
 # byte-identical by `compare_runtime_profile_trees` in the verifier (proved
 # red and green further down), so copying a fixture from here is copying the
@@ -357,7 +357,7 @@ expect_rejection "pnpm-lock byte drift to fail validation" \
 # crates/local-apps/templates/runtime-profiles, but the bytes the engine
 # SHIPS come from a SECOND on-disk copy: `profile_file!` in
 # crates/local-app-builder-service/src/runtime_profiles.rs
-# `include_bytes!`es crates/plugins/lingxi-local-app/assets/templates/.
+# `include_bytes!`es crates/plugins/local-app-builder/assets/templates/.
 # `compare_runtime_profile_trees` is what makes the attestation cover the
 # shipped bytes, so it gets its own red-and-green proof: exercised directly on
 # temp trees, because the only other way to make it go red is to corrupt the
@@ -725,7 +725,7 @@ module_path = repo / "scripts/runtime/verify-local-app-supply-chain.py"
 spec = importlib.util.spec_from_file_location("local_app_supply_verify", module_path)
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
-text = (repo / "crates/plugins/lingxi-local-app/skills/create-local-app/SKILL.md").read_text(encoding="utf-8")
+text = (repo / "crates/plugins/local-app-builder/skills/create-local-app/SKILL.md").read_text(encoding="utf-8")
 mutations = {
     "plan approval is the create confirmation": (
         "That approval — the Allow on the plan — IS the create confirmation.",
@@ -745,7 +745,7 @@ mutations = {
     ),
     "retired build workflow reintroduced": (
         "## 5. Deliver",
-        "## 5. Deliver\n\nLaunch the build workflow lingxi-local-app:local-app-build to finish.",
+        "## 5. Deliver\n\nLaunch the build workflow local-app-builder:local-app-build to finish.",
     ),
     "deleted create agent reintroduced": (
         "## 1. Plan",
