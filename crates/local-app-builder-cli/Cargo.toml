@@ -4,9 +4,9 @@ version = "0.12.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "The `local-app-builder` command: runs the Local App service outside LingXi."
+description = "The `local-app-builder` command: checks this machine and installs the toolchain Local App builds run with."
 
-# A leaf of the workspace: nothing depends on it (check_deps.py R7). It sits above the service and may use any of it.
+# A leaf of the workspace: nothing depends on it (check_deps.py R7).
 [lib]
 name = "local_app_builder_cli"
 path = "src/lib.rs"
@@ -16,21 +16,14 @@ name = "local-app-builder"
 path = "src/main.rs"
 
 [dependencies]
-async-trait.workspace = true
-local-app-builder-contracts = { path = "../local-app-builder-contracts" }
 local-app-builder-host = { path = "../local-app-builder-host" }
-local-app-builder-service = { path = "../local-app-builder-service" }
-local-apps = { path = "../local-apps", default-features = false }
-mcp-wire = { path = "../mcp-wire" }
-serde_json.workspace = true
-sha2 = "0.10"
-tokio = { workspace = true, features = ["io-std", "io-util"] }
+tokio.workspace = true
 
 [dev-dependencies]
 flate2 = "1"
+sha2 = "0.10"
 tar = { version = "0.4", default-features = false }
 tempfile = "3.13"
-tokio = { workspace = true, features = ["io-std", "io-util", "test-util"] }
 
 [lints]
 workspace = true

@@ -627,14 +627,8 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 name = "local-app-builder-cli"
 version = "0.12.0"
 dependencies = [
- "async-trait",
  "flate2",
- "local-app-builder-contracts",
  "local-app-builder-host",
- "local-app-builder-service",
- "local-apps",
- "mcp-wire",
- "serde_json",
  "sha2",
  "tar",
  "tempfile",

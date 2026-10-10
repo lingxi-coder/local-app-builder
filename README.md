@@ -20,7 +20,7 @@ The repository is public (`lingxi-coder/local-app-builder`) and licensed under t
 | `crates/local-app-builder-contracts` | ids and the vocabulary shared by the service and its hosts; no dependencies |
 | `crates/local-apps` | the core: app state, persistence (SQLite), checkpoints, authoring/QA and MCP-authoring rules, the plugin packer |
 | `crates/local-app-builder-service` | orchestration: the broker, the build pipeline, the in-process MCP server, and the seams a host implements |
-| `crates/local-app-builder-cli` | the `local-app-builder` command (a leaf; nothing depends on it): `version`, `doctor`, `toolchain` and the stdio MCP server (`mcp`) |
+| `crates/local-app-builder-cli` | the `local-app-builder` command (a leaf; nothing depends on it): `version`, `doctor` and `toolchain` |
 | `crates/device-api` | device capability traits |
 | `crates/json-projection` | JSON that keeps JavaScript's exact UTF-16 strings (lone surrogates) beside the Rust-safe tree |
 | `crates/mcp-wire` | MCP wire types and the in-process transport traits |
