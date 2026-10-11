@@ -1,5 +1,5 @@
-# Skeleton written during the P2c rehearsal. NOT RUN: there is no remote and no runner. Every step is a command that
-# was run locally against the rehearsal repository (see the rehearsal report); the workflow wiring itself is untested.
+# Every step below was run locally (scripts/check-all.sh, node --test, and the five template installs and builds on
+# macOS); the workflow wiring itself has not run on a GitHub runner yet.
 name: ci
 
 on:
@@ -7,35 +7,30 @@ on:
     branches: [main]
   pull_request:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/setup-node@v4
         with:
-          toolchain: "1.94.0"
-          components: rustfmt, clippy
+          node-version: "22"
       - run: ./scripts/check-all.sh
-      - run: python3 scripts/tests/test_dependency_rules.py
       - run: node --test scripts/tests/test-local-app-r4-libs.mjs
 
-  test:
+  templates:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        template: [react-dom, canvas-2d, three-3d, phaser-2d, babylon-3d]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/setup-node@v4
         with:
-          toolchain: "1.94.0"
-          components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - run: cargo test --locked --workspace --no-fail-fast
-      # The service without its default features: no libgit2 in the graph.
-      - run: cargo test --locked -p local-app-builder-service --no-default-features --lib
+          node-version: "22"
+      # The same commands the create-local-app skill runs on the user's machine.
+      - working-directory: plugins/local-app-builder/assets/templates/${{ matrix.template }}/r4
+        run: |
+          npm exec --yes --package=pnpm@12.5.1 -- pnpm install --frozen-lockfile
+          npm exec --yes --package=pnpm@12.5.1 -- pnpm build
+          test -f dist/index.html

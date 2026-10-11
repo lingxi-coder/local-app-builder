@@ -1,0 +1,12 @@
+{
+  "name": "local-app-builder",
+  "displayName": "Local App Builder",
+  "version": "2.0.0",
+  "description": "Plan, scaffold, build and open local web apps from bundled templates, using standard tools only.",
+  "author": {
+    "name": "LingXi"
+  },
+  "license": "MIT",
+  "defaultEnabled": true,
+  "skills": "./skills/"
+}

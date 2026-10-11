@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import test from 'node:test';
 
-const root = fileURLToPath(new URL('../../crates/plugins/local-app-builder/assets/templates/', import.meta.url));
+const root = fileURLToPath(new URL('../../plugins/local-app-builder/assets/templates/', import.meta.url));
 const revision = 'r4';
 const families = ['react-dom', 'canvas-2d', 'three-3d', 'phaser-2d', 'babylon-3d'];
 
@@ -12,7 +12,7 @@ function load(family, file, globals = {}) {
   let source = readFileSync(`${root}${family}/${revision}/lib/${file}`, 'utf8');
   const names = [...source.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map((match) => match[1]);
   source = source.replace(/^import [\s\S]*? from [^;]+;\n/gm, '').replace(/export /g, '');
-  source = source.replace(/return \(\s*<LingXiBridgeContext.Provider[\s\S]*?<\/LingXiBridgeContext.Provider>\s*\);/, 'return value;');
+  source = source.replace(/return \(\s*<PlatformContext.Provider[\s\S]*?<\/PlatformContext.Provider>\s*\);/, 'return value;');
   const context = vm.createContext({ console, ...globals });
   return vm.runInContext(`${source}\n;({${names.join(',')}})`, context);
 }
@@ -50,24 +50,96 @@ function browser() {
   };
 }
 
+/// Media queries answer from `matching` and are event targets, so a test can
+/// flip one and fire its `change` event the way a browser does.
+function mediaQueries(matching = []) {
+  const lists = new Map();
+  return {
+    lists,
+    matchMedia(query) {
+      if (!lists.has(query)) lists.set(query, Object.assign(target(), { matches: matching.includes(query) }));
+      return lists.get(query);
+    },
+  };
+}
+
+/// A desktop-class browser with no safe-area probe: `document.body` is absent,
+/// so `readSafeArea` takes its fallback unless a test supplies one.
+function device(family, { userAgent = '', maxTouchPoints = 0, screen = { width: 1440, height: 900 },
+  matching = [], innerWidth = 1280, innerHeight = 800, visualViewport = null, document = {},
+  getComputedStyle } = {}) {
+  const media = mediaQueries(matching);
+  const window = { innerWidth, innerHeight, screen, visualViewport, matchMedia: media.matchMedia };
+  const globals = { window, navigator: { userAgent, maxTouchPoints }, document };
+  if (getComputedStyle) globals.getComputedStyle = getComputedStyle;
+  return load(family, 'device-context.js', globals);
+}
+
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15';
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 Chrome/141.0 Mobile Safari/537.36';
+
 for (const family of families) {
-  test(`${family}: Host v2 data mutations preserve native tagged contract`, async () => {
-    const calls = [];
-    const bridge = load(family, 'lingxi-bridge.js', { window: { lingxi: { v2: { data: { mutate: (request) => calls.push(request) } } } } });
-    await bridge.upsertRecord('entries', 'one', { value: 3 }, 2);
-    await bridge.deleteRecord('entries', 'one');
-    assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-      { collection: 'entries', operations: [{ kind: 'upsert', recordId: 'one', document: { value: 3 }, expectedRevision: 2 }] },
-      { collection: 'entries', operations: [{ kind: 'delete', recordId: 'one' }] },
-    ]);
+  test(`${family}: device context classifies OS and form factor from the browser`, () => {
+    const facts = (options) => {
+      const context = device(family, options).getDeviceContext();
+      return `${context.os}:${context.formFactor}`;
+    };
+    assert.equal(facts({ userAgent: IPHONE, maxTouchPoints: 5 }), 'ios:iphone');
+    // iPadOS sends a Mac user agent; the touch points give it away.
+    assert.equal(facts({ userAgent: MAC, maxTouchPoints: 5 }), 'ios:ipad');
+    assert.equal(facts({ userAgent: MAC, maxTouchPoints: 0 }), 'desktop:desktop');
+    assert.equal(facts({ userAgent: ANDROID, screen: { width: 412, height: 915 } }), 'android:phone');
+    assert.equal(facts({ userAgent: ANDROID, screen: { width: 800, height: 1280 } }), 'android:tablet');
   });
-  test(`${family}: context getters remain live and invalid dimensions are normalized`, () => {
-    let width = 320;
-    const bridge = load(family, 'lingxi-bridge.js', { window: { lingxi: { v2: { deviceContext: { os: 'ios', get viewport() { return { width, height: -1 }; } } } } } });
-    assert.equal(bridge.getDeviceContext().viewport.width, 320);
-    width = 700;
-    assert.equal(bridge.getDeviceContext().viewport.width, 700);
-    assert.equal(bridge.getDeviceContext().viewport.height, 0);
+
+  test(`${family}: device context reads appearance, motion, input mode and viewport`, () => {
+    const dark = device(family, {
+      userAgent: MAC,
+      matching: ['(prefers-color-scheme: dark)', '(prefers-reduced-motion: reduce)', '(pointer: fine)', '(any-pointer: coarse)'],
+      visualViewport: { width: 640, height: 480 },
+    }).getDeviceContext();
+    assert.equal(dark.colorScheme, 'dark');
+    assert.equal(dark.reducedMotion, true);
+    assert.equal(dark.inputMode, 'hybrid');
+    // The visual viewport (keyboard, pinch-zoom) wins over the layout viewport.
+    assert.deepEqual({ ...dark.viewport }, { width: 640, height: 480 });
+
+    const plain = device(family, { userAgent: MAC, matching: ['(pointer: fine)'] }).getDeviceContext();
+    assert.equal(plain.colorScheme, 'light');
+    assert.equal(plain.reducedMotion, false);
+    assert.equal(plain.inputMode, 'pointer');
+    assert.deepEqual({ ...plain.viewport }, { width: 1280, height: 800 });
+    assert.equal(device(family, { userAgent: IPHONE }).getDeviceContext().inputMode, 'touch');
+  });
+
+  test(`${family}: safe-area insets come from one reused probe element`, () => {
+    const appended = [];
+    const probe = { style: {}, setAttribute() {}, isConnected: false };
+    const document = {
+      body: { appendChild(element) { appended.push(element); element.isConnected = true; } },
+      createElement: () => probe,
+    };
+    const getComputedStyle = () => ({ paddingTop: '47px', paddingRight: '0px', paddingBottom: '34px', paddingLeft: 'bogus' });
+    const module = device(family, { userAgent: IPHONE, document, getComputedStyle });
+    assert.deepEqual({ ...module.getDeviceContext().safeArea }, { top: 47, right: 0, bottom: 34, left: 0 });
+    module.getDeviceContext();
+    assert.equal(appended.length, 1);
+  });
+
+  test(`${family}: normalizeDeviceContext rejects invalid values`, () => {
+    const { normalizeDeviceContext, FALLBACK_DEVICE_CONTEXT } = device(family);
+    assert.equal(normalizeDeviceContext(null), FALLBACK_DEVICE_CONTEXT);
+    const context = normalizeDeviceContext({
+      os: 7, viewport: { width: -1, height: Number.NaN }, safeArea: { top: Infinity },
+      colorScheme: 'sepia', reducedMotion: 'yes', inputMode: 'gamepad',
+    });
+    assert.equal(context.os, 'unknown');
+    assert.deepEqual({ ...context.viewport }, { width: 0, height: 0 });
+    assert.equal(context.safeArea.top, 0);
+    assert.equal(context.colorScheme, 'unknown');
+    assert.equal(context.reducedMotion, false);
+    assert.equal(context.inputMode, 'unknown');
   });
 }
 
@@ -148,39 +220,52 @@ function reactHarness() {
 }
 
 for (const family of families) {
-  test(`${family}: provider catches resume/viewport updates and StrictMode cleans listeners`, () => {
+  test(`${family}: provider follows resume, viewport and appearance changes; StrictMode cleans listeners`, () => {
     const env = browser();
-    const media = new Map();
-    env.window.matchMedia = (query) => {
-      if (!media.has(query)) media.set(query, target());
-      return media.get(query);
+    const media = mediaQueries();
+    env.window.matchMedia = media.matchMedia;
+    env.window.innerWidth = 320;
+    env.window.innerHeight = 600;
+    env.window.screen = { width: 390, height: 844 };
+    const toggles = [];
+    env.document.documentElement = {
+      dataset: {}, style: { setProperty() {} },
+      classList: { toggle(name, on) { toggles.push([name, on]); } },
     };
-    env.document.documentElement = { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } };
-    let width = 320;
-    env.window.lingxi = { v2: { deviceContext: {
-      os: 'ios', formFactor: 'iphone', get viewport() { return { width, height: 600 }; },
-    } } };
-    const bridge = load(family, 'lingxi-bridge.js', env);
-    const platform = load(family, 'platform-adapter.js', { ...env, ...bridge });
+    const globals = { ...env, navigator: { userAgent: IPHONE, maxTouchPoints: 5 } };
+    const deviceModule = load(family, 'device-context.js', globals);
+    const platform = load(family, 'platform-adapter.js', { ...globals, ...deviceModule });
     const react = reactHarness();
-    const { LingXiBridgeProvider } = load(family, 'lingxi-provider.jsx', { ...env, ...bridge, ...platform, ...react.hooks });
-    assert.equal(react.render(LingXiBridgeProvider).device.viewport.width, 320);
-    width = 400;
+    const { PlatformProvider } = load(family, 'platform-provider.jsx', {
+      ...globals, ...deviceModule, ...platform, ...react.hooks,
+    });
+
+    assert.equal(react.render(PlatformProvider).device.viewport.width, 320);
+    // Published on <html>, where no app screen can drop it.
+    assert.equal(env.document.documentElement.dataset.platform, 'ios:iphone');
+    env.window.innerWidth = 400;
     env.window.emit('pageshow');
-    assert.equal(react.render(LingXiBridgeProvider).device.viewport.width, 400);
-    width = 450;
+    assert.equal(react.render(PlatformProvider).device.viewport.width, 400);
+    env.window.innerWidth = 450;
     env.document.emit('visibilitychange');
-    assert.equal(react.render(LingXiBridgeProvider).device.viewport.width, 450);
-    width = 470;
+    assert.equal(react.render(PlatformProvider).device.viewport.width, 450);
+    env.window.innerWidth = 470;
     env.window.visualViewport.emit('scroll');
-    assert.equal(react.render(LingXiBridgeProvider).device.viewport.width, 470);
+    assert.equal(react.render(PlatformProvider).device.viewport.width, 470);
+
+    const dark = media.lists.get('(prefers-color-scheme: dark)');
+    dark.matches = true;
+    dark.emit('change');
+    assert.equal(react.render(PlatformProvider).device.colorScheme, 'dark');
+    assert.deepEqual(toggles.at(-1), ['ion-palette-dark', true]);
+
     react.cleanup();
     assert.equal(env.window.count() + env.window.visualViewport.count() + env.document.count(), 0);
-    assert.equal([...media.values()].reduce((sum, item) => sum + item.count(), 0), 0);
-    react.render(LingXiBridgeProvider);
-    width = 500;
+    assert.equal([...media.lists.values()].reduce((sum, item) => sum + item.count(), 0), 0);
+    react.render(PlatformProvider);
+    env.window.innerWidth = 500;
     env.window.emit('resize');
-    assert.equal(react.render(LingXiBridgeProvider).device.viewport.width, 500);
+    assert.equal(react.render(PlatformProvider).device.viewport.width, 500);
     react.cleanup();
   });
 }
@@ -271,4 +356,3 @@ test('Babylon: terminal cleanup prevents restarting a disposed engine and late p
   assert.equal(scheduling.state.starts, 1);
   assert.equal(scheduling.state.stops, 1);
 });
-

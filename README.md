@@ -1,15 +1,12 @@
 # local-app-builder
 
-The Local App project: letting an agent create, build, run and modify small local web apps from a plan the owner has
-approved, and the plugin (`create-local-app` and its skills) that exposes it. The working name is `local-app-builder`.
+A LingXi plugin that helps the model build small local web apps. It plans the app with the user, scaffolds it from one of
+five templates, implements it, builds it with pnpm, and opens the built `dist/index.html` in the user's desktop browser. The
+generated app is a self-contained page: it uses standard web APIs only and keeps its data in that browser.
 
-It was developed inside `harness-runtime` (LingXi's engine) and extracted from it. It must not depend on that repository or
-on any product repository: `scripts/checks/check-deps.sh` holds the graph to that, and `check-contract-digests.sh` pins the
-template catalogue.
-
-**Status.** The plugin ships from here: `crates/plugins/local-app-builder`, listed in `.lingxi-plugin/marketplace.json` and installed
-through LingXi's plugin flow like any other plugin. It is skills, agents, workflows, schemas and template assets; it uses no MCP server.
-No application links `local-app-builder-service`.
+The plugin is skills and template assets only. It declares no agents, workflows, MCP servers or hooks, and its skills call no
+host-specific tool: the model uses plan mode, `AskUserQuestion`, Write/Edit and Bash as for any other task. It runs in LingXi on
+the desktop; the mobile app does not run it.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
@@ -17,41 +14,42 @@ The repository is public (`lingxi-coder/local-app-builder`) and licensed under t
 
 | path | what it is |
 | --- | --- |
-| `crates/local-app-builder-contracts` | ids and the vocabulary shared by the service and its hosts; no dependencies |
-| `crates/local-apps` | the core: app state, persistence (SQLite), checkpoints, authoring/QA and MCP-authoring rules, the plugin packer |
-| `crates/local-app-builder-service` | orchestration: the broker, the build pipeline, the in-process MCP server, and the seams a host implements |
-| `crates/local-app-builder-cli` | the `local-app-builder` command (a leaf; nothing depends on it): `version`, `doctor` and `toolchain` |
-| `crates/device-api` | device capability traits |
-| `crates/json-projection` | JSON that keeps JavaScript's exact UTF-16 strings (lone surrogates) beside the Rust-safe tree |
-| `crates/mcp-wire` | MCP wire types and the in-process transport traits |
-| `crates/rooted-fs` | rooted file operations: containment, atomic writes, file locks |
-| `crates/local-app-builder-plugin` | where the plugin tree is, and the schemas, workflow scripts and fixtures a host embeds |
-| `crates/plugins/local-app-builder` | the plugin tree: skills, agents, workflows, schemas, template assets (`.inventory.txt` beside it lists its files) |
-| `docs/local-apps` | design history (Chinese) and the performance baselines the core embeds |
-| `docs/runtime` | the runtime seed's pins, policy and SBOM (`local-app-runtime-{pins,policy}.json`, `sbom/`) |
-| `scripts/runtime` | build and attest the runtime seed: `verify-local-app-supply-chain.py`, `stage-local-app-runtime.py`, `build-local-app-node-modules.py`, `generate-local-app-sbom.py` |
+| `.lingxi-plugin/marketplace.json` | the marketplace; it lists this one plugin |
+| `plugins/local-app-builder` | the plugin: `.lingxi-plugin/plugin.json`, `skills/`, `assets/templates/` |
+| `plugins/local-app-builder/skills/create-local-app` | the flow: plan, scaffold, implement, build, deliver |
+| `plugins/local-app-builder/skills/*` | the references the flow loads: design, accessibility, React, Ionic, and one per drawn-surface engine |
+| `plugins/local-app-builder/assets/templates` | `catalog.json` and the five templates, each pinned to exact versions with a pnpm lockfile |
+| `scripts/checks` | the gates; `scripts/check-all.sh` runs every one of them |
+| `scripts/tests` | the gates' negative probes (`test_plugin_gates.py`) and the template library tests (`test-local-app-r4-libs.mjs`) |
+| `docs/local-apps` | design history (Chinese) from when Local Apps were a host feature; it describes code that no longer exists |
 
-## Build and test
+## The templates
 
-    cargo test --workspace
+`react-dom` is a routed Ionic app; `canvas-2d`, `three-3d`, `phaser-2d` and `babylon-3d` are one drawn surface with Ionic
+overlays. All five are React 19, Ionic 9 and Vite 8, and they detect the device (OS, form factor, input mode, safe areas,
+appearance) from the browser.
+
+A build must work when `dist/index.html` is opened from disk. Every template's `vite.config.mjs` therefore builds one classic
+script (`format: "iife"`), rewrites the entry tag to `<script defer>`, uses relative URLs, and inlines every imported asset as a
+data URL; `check-plugin.sh` fails if any of those settings is lost. The files the templates share are byte-identical, and the
+gate holds them to that.
+
+To try a template by hand, copy it out first (the gate rejects build output inside the plugin):
+
+    cp -R plugins/local-app-builder/assets/templates/react-dom/r4 /tmp/try-react-dom
+    cd /tmp/try-react-dom
+    npm exec --yes --package=pnpm@12.5.1 -- pnpm install --frozen-lockfile
+    npm exec --yes --package=pnpm@12.5.1 -- pnpm build
+    open dist/index.html
+
+## Checks
+
     ./scripts/check-all.sh
+    node --test scripts/tests/test-local-app-r4-libs.mjs
 
-`git2` is requested from crates.io with default features off (libgit2 only for local repositories). A workspace that already
-links libgit2 chooses the copy with its own `[patch.crates-io]`: one package may link it. Without the `git-checkpoints`
-feature of `local-apps` (and of `local-app-builder-service`) the graph has no libgit2 at all.
+## History
 
-### The runtime seed
-
-The templates under `crates/local-apps/templates/runtime-profiles` are what a host stages onto a device. The scripts in
-`scripts/runtime` check them against the pins in `docs/runtime`, and stage them read-only for a native app bundle. The shared
-toolchain pins (Node, pnpm, TypeScript, the APK identities) belong to the mobile-linux SDK, which this repository does not depend on,
-so every script takes `--sdk-root <checkout>`. `scripts/tests/test-local-app-supply-chain.sh --sdk-root <checkout>` proves the
-verifier rejects what it should; it needs that checkout too, so it runs in the product's CI rather than here.
-
-## Used by
-
-Nothing links the service or the CLI. The engine (`harness-runtime`) and the LingXi apps contain no Local App code; they take
-four shared libraries from this repository by git pin (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`) and a person or a
-model installs the plugin like any other.
-`mcp-wire` still holds `export` (the Local App conversation-export scope), which the engine's MCP registry names in its managed-server
-API; that is the one piece of Local App vocabulary left in the shared libraries.
+Local Apps used to be a host feature. Rust crates in this repository (`local-apps`, `local-app-builder-service`, a CLI and a
+plugin packer) backed the host tools the old skills called, a page bridge (`window.lingxi`) and an MCP widget; all of that is
+gone. The four libraries the engine shared with it (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`) moved into the
+engine repository, `harness-runtime`.

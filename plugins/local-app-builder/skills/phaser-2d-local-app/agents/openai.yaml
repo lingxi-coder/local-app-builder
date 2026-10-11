@@ -1,0 +1,4 @@
+interface:
+  display_name: "Phaser 2D Local App"
+  short_description: "Build Phaser-based local app scenes"
+  default_prompt: "Use $phaser-2d-local-app to implement this local app with the Phaser 2D template runtime, explicit scene lifecycle, and keyboard and pointer input parity."

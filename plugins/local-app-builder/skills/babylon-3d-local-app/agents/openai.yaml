@@ -1,0 +1,4 @@
+interface:
+  display_name: "Babylon 3D Local App"
+  short_description: "Build Babylon-based local app scenes"
+  default_prompt: "Use $babylon-3d-local-app to implement this local app with the Babylon 3D template runtime and explicit engine lifecycle."

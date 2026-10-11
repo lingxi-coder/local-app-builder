@@ -1,0 +1,4 @@
+interface:
+  display_name: "Three.js Local App"
+  short_description: "Build disciplined Three.js local app scenes"
+  default_prompt: "Use $threejs-local-app to implement this local app with Three.js 0.186.0 and explicit lifecycle, input, and disposal rules."
