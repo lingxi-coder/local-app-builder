@@ -5,16 +5,27 @@ five templates, implements it, builds it with pnpm, and opens the built `dist/in
 generated app is a self-contained page: it uses standard web APIs only and keeps its data in that browser.
 
 The plugin is skills and template assets only. It declares no agents, workflows, MCP servers or hooks, and its skills call no
-host-specific tool: the model uses plan mode, `AskUserQuestion`, Write/Edit and Bash as for any other task. It runs in LingXi on
-the desktop; the mobile app does not run it.
+host-specific tool: the model uses plan mode, `AskUserQuestion`, Write/Edit and Bash as for any other task.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
+
+## Install
+
+The repository is a marketplace named `lingxi`, owned by LingXi, so the plugin's id is `local-app-builder@lingxi`.
+
+- **Desktop:** add this repository as a marketplace (`lingxi-coder/local-app-builder`) and install `local-app-builder@lingxi`.
+- **Android and iOS:** the LingXi apps carry this repository as the git submodule `resources/bundled-plugins/local-app-builder`
+  of `lingxi-app`. They pack its `.lingxi-plugin/`, `plugins/` and `LICENSE` into the app and install the plugin when they
+  start. On a phone, `create-local-app` still asks the user to create the app from LingXi on a computer.
+
+The apps update an installed copy only when `plugins/local-app-builder/.lingxi-plugin/plugin.json` carries a new `version`,
+so bump it with every change to the plugin.
 
 ## Layout
 
 | path | what it is |
 | --- | --- |
-| `.lingxi-plugin/marketplace.json` | the marketplace; it lists this one plugin |
+| `.lingxi-plugin/marketplace.json` | the marketplace `lingxi`; it lists this one plugin |
 | `plugins/local-app-builder` | the plugin: `.lingxi-plugin/plugin.json`, `skills/`, `assets/templates/` |
 | `plugins/local-app-builder/skills/create-local-app` | the flow: plan, scaffold, implement, build, deliver |
 | `plugins/local-app-builder/skills/*` | the references the flow loads: design, accessibility, React, Ionic, and one per drawn-surface engine |

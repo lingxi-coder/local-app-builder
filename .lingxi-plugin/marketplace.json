@@ -1,8 +1,8 @@
 {
-  "name": "local-app-builder",
-  "description": "Local App Builder plugin for LingXi: skills and templates for local web apps.",
+  "name": "lingxi",
+  "description": "LingXi plugins: Local App Builder, skills and templates for local web apps.",
   "owner": {
-    "name": "Local App"
+    "name": "LingXi"
   },
   "plugins": [
     {
