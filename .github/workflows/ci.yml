@@ -33,4 +33,6 @@ jobs:
         run: |
           npm exec --yes --package=pnpm@12.5.1 -- pnpm install --frozen-lockfile
           npm exec --yes --package=pnpm@12.5.1 -- pnpm build
+          # The whole app is this one file; LocalApp publishes nothing else.
           test -f dist/index.html
+          test "$(find dist -type f | wc -l)" -eq 1

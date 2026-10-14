@@ -1,25 +1,33 @@
 # local-app-builder
 
-A LingXi plugin that helps the model build small local web apps. It plans the app with the user, scaffolds it from one of
-five templates, implements it, builds it with pnpm, and opens the built `dist/index.html` in the user's desktop browser. The
-generated app is a self-contained page: it uses standard web APIs only and keeps its data in that browser.
+A LingXi plugin that helps the model build local web apps. It plans the app with the user, scaffolds it from one of five
+templates, implements it and builds it with pnpm into ONE self-contained file, `dist/index.html`. Where LingXi offers its
+built-in `LocalApp` tool, that file is published to the device's app library (the app opens from a card in the chat and from
+the Apps page); otherwise the user's desktop browser opens it from disk. The app uses standard web APIs only and keeps its
+data on that device.
 
-The plugin is skills and template assets only. It declares no agents, workflows, MCP servers or hooks, and its skills call no
-host-specific tool: the model uses plan mode, `AskUserQuestion`, Write/Edit and Bash as for any other task.
+It extends LingXi's built-in app builder. The Android and iOS apps build simple apps without any plugin: their `local-app`
+skill writes one HTML document and publishes it with `LocalApp`. This plugin adds what that cannot: React, Ionic and the
+game-engine templates, the design and engine knowledge, and a real build.
+
+The plugin is skills and template assets only. It declares no agents, workflows, MCP servers or hooks. Its skills use plan
+mode, `AskUserQuestion`, Write/Edit and Bash as for any other task; the one host tool they name is `LocalApp`, and only
+where the host offers it.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
 ## Install
 
-The repository is a marketplace named `lingxi`, owned by LingXi, so the plugin's id is `local-app-builder@lingxi`.
+The repository is a marketplace named `lingxi`, owned by LingXi, so the plugin's id is `local-app-builder@lingxi`. No LingXi
+app bundles the plugin. The Android and iOS apps add the `lingxi` marketplace when they first start (in mainland China from
+a domestic mirror, once one exists) and install nothing; the user installs the plugin from Settings → Plugins. On a
+computer, add this repository as a marketplace (`lingxi-coder/local-app-builder`) and install `local-app-builder@lingxi`.
 
-- **Desktop:** add this repository as a marketplace (`lingxi-coder/local-app-builder`) and install `local-app-builder@lingxi`.
-- **Android and iOS:** the LingXi apps carry this repository as the git submodule `resources/bundled-plugins/local-app-builder`
-  of `lingxi-app`. They pack its `.lingxi-plugin/`, `plugins/` and `LICENSE` into the app and install the plugin when they
-  start. On a phone, `create-local-app` still asks the user to create the app from LingXi on a computer.
+On a phone, `create-local-app` sends simple apps to the built-in `local-app` skill and asks the user to create a
+framework or game-engine app from LingXi on a computer: the pnpm build needs Node.js.
 
-The apps update an installed copy only when `plugins/local-app-builder/.lingxi-plugin/plugin.json` carries a new `version`,
-so bump it with every change to the plugin.
+An installed copy updates only to a new `version` in `plugins/local-app-builder/.lingxi-plugin/plugin.json`, so bump it with
+every change to the plugin.
 
 ## Layout
 
@@ -40,9 +48,10 @@ so bump it with every change to the plugin.
 overlays. All five are React 19, Ionic 9 and Vite 8, and they detect the device (OS, form factor, input mode, safe areas,
 appearance) from the browser.
 
-A build must work when `dist/index.html` is opened from disk. Every template's `vite.config.mjs` therefore builds one classic
-script (`format: "iife"`), rewrites the entry tag to `<script defer>`, uses relative URLs, and inlines every imported asset as a
-data URL; `check-plugin.sh` fails if any of those settings is lost. The files the templates share are byte-identical, and the
+A build is ONE file, `dist/index.html`, that works when it is opened from disk and when `LocalApp` publishes it alone. Every
+template's `vite.config.mjs` therefore builds one classic script (`format: "iife"`), inlines it at the end of `<body>`,
+inlines every imported asset as a data URL, uses relative URLs and copies nothing from `public/`; `check-plugin.sh` fails if
+any of those settings is lost, and CI fails a build that writes a second file. The files the templates share are byte-identical, and the
 gate holds them to that.
 
 To try a template by hand, copy it out first (the gate rejects build output inside the plugin):
@@ -64,3 +73,7 @@ Local Apps used to be a host feature. Rust crates in this repository (`local-app
 plugin packer) backed the host tools the old skills called, a page bridge (`window.lingxi`) and an MCP widget; all of that is
 gone. The four libraries the engine shared with it (`device-api`, `json-projection`, `mcp-wire`, `rooted-fs`) moved into the
 engine repository, `harness-runtime`.
+
+In October 2026 the engine regained a small built-in tier: the `LocalApp` tool and the `local-app` skill
+(`harness-runtime/crates/local-app`), which publish one HTML document per app to an on-device library. With 2.1.0 this plugin
+became its extension, and its builds became single-file so they publish the same way.

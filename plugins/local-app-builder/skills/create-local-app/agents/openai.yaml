@@ -1,4 +1,4 @@
 interface:
   display_name: "Create Local App"
-  short_description: "Build a local web app that opens from disk"
-  default_prompt: "Use $create-local-app to agree on the app with the user, then scaffold, implement, build, and open a local web app in the desktop browser."
+  short_description: "Build a local web app and publish or open it"
+  default_prompt: "Use $create-local-app to agree on the app with the user, then scaffold, implement and build a local web app, and publish it to the app library or open it in the browser."

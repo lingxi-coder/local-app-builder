@@ -1,19 +1,23 @@
 ---
 name: create-local-app
-description: Plan a local web app with the user, scaffold it from this plugin's templates, implement it, build it with pnpm, and open the built page in the desktop browser.
+description: Plan a local web app with the user, scaffold it from this plugin's templates, build it with pnpm, then publish it to LingXi's app library or open it in the browser.
 ---
 
 # Create or modify a local app
 
-A local app is a self-contained web page. It builds into `dist/index.html` plus
-one script, the user opens it straight from disk in their desktop browser, and
-it keeps its data in that browser. It uses standard web APIs only: no server,
-no account, no native bridge.
+A local app is a self-contained web page. It builds into ONE file,
+`dist/index.html`. Where LingXi offers the `LocalApp` tool, that file is
+published to the device's app library: the app opens from a card in the chat
+and from the Apps page, and keeps its data there. Otherwise the user opens the
+file straight from disk in their desktop browser, and the app keeps its data in
+that browser. It uses standard web APIs only: no server, no account, no native
+bridge.
 
 The MAIN session does all of the work with the ordinary tools: plan mode and
 `AskUserQuestion` to agree on the app, Write and Edit for source, Bash for the
-copy, install and build. Nothing scores the result and there is no automatic
-verification; the user tries the built app.
+copy, install and build, and `LocalApp` to publish when it exists. Nothing
+scores the result and there is no automatic verification; the user tries the
+built app.
 
 Specialist skills are references for the source you write: `$frontend-design`,
 `$accessibility`, `$react-best-practices`, `$ionic-react-local-app`, and the
@@ -29,10 +33,13 @@ The templates ship with this plugin:
 
 ## Where this runs
 
-This flow needs a desktop: Node.js, a shell, and a browser that opens a local
-file. If the session carries a `Mobile runtime environment` reminder, you are in
-the LingXi mobile app, where it does not run. Tell the user to create the app
-from LingXi on their computer, and stop.
+This flow needs a desktop: Node.js and a shell for the build. If the session
+carries a `Mobile runtime environment` reminder, you are in the LingXi mobile
+app, where it does not run. A simple app — one screen or a few, forms, lists,
+a timer, a small canvas game — needs none of it there: build it with LingXi's
+built-in `local-app` skill, which writes one HTML document and publishes it
+with `LocalApp`. For an app that needs this plugin's frameworks or game
+engines, tell the user to create it from LingXi on their computer, and stop.
 
 ## 1. Plan
 
@@ -45,12 +52,13 @@ Converge the following, asking only materially unresolved questions with
 decision, and never leaving an open question in ordinary assistant text:
 
 - **Product** — the goal, the main features, and the success condition.
-- **Targets** — the app runs in the desktop browser that opens it, so the
-  default target is `desktop`. Add an iPhone, iPad, Android phone or tablet
-  presentation only when the user asks for one, and show it in the plan.
-- **Data** — what the app stores, and that it stays in this browser on this
-  computer (see Data below). Say so plainly when the brief expects sync,
-  sharing, or an account.
+- **Targets** — the app runs on this computer, in LingXi's app library or the
+  browser that opens it, so the default target is `desktop`. Add an iPhone,
+  iPad, Android phone or tablet presentation only when the user asks for one,
+  and show it in the plan.
+- **Data** — what the app stores, and that it stays on this computer, in the
+  app library or the browser (see Data below). Say so plainly when the brief
+  expects sync, sharing, or an account.
 - **UI** — a COMPLETE recommendation, presented in full: page structure and
   navigation, layout, light/dark/system theme and accent, style and density,
   the complete states, and how it adapts across the targets. State it
@@ -118,7 +126,8 @@ Keep the app's data in the browser: IndexedDB for records, `localStorage` only
 for small settings. Namespace both with the folder name — the database is
 `errand-list`, every `localStorage` key starts with `errand-list:` — because the
 browser gives every page opened from `file://` one shared storage, and a plain
-key such as `settings` collides with every other local app. Validate what you
+key such as `settings` collides with every other local app. A published app
+has an origin of its own, but the same file may still be opened from disk. Validate what you
 read back (zod is pinned): stored data outlives the code that wrote it. Surface
 a failed save as a retryable error; never report success for it.
 
@@ -132,7 +141,8 @@ bridge, no Capacitor or other wrapper, no CDN script or font (the page must work
 offline), and no secret in source. Ask for camera, microphone, location,
 clipboard or notifications only from a user action, and keep the screen usable
 when the browser or the user refuses; a browser may grant a `file://` page less
-than a website.
+than a website, and LingXi's app library grants no camera, microphone or
+location at all.
 
 A request to an external API leaves from origin `null`, so only a service that
 allows any origin answers it. Use an external service only when the user asked
@@ -175,7 +185,8 @@ Run every command inside the app folder.
    Corepack: it cannot start pnpm 12.
 3. `pnpm install --frozen-lockfile`. The first install downloads packages and
    needs the network.
-4. `pnpm build` writes `dist/index.html` and one script under `dist/assets/`.
+4. `pnpm build` writes one file, `dist/index.html`: the whole app, with its
+   script, styles and assets inlined.
 
 A successful build is the completion condition. When it fails, read the error;
 fix your source and build again as long as the failure is a defect you can
@@ -184,16 +195,27 @@ for the install, a missing or broken Node — report it to the user and stop.
 
 ## 5. Deliver
 
-Open the built page in the user's default browser: `open dist/index.html` on
-macOS, `xdg-open dist/index.html` on Linux, `start "" dist\index.html` on
-Windows.
+If the `LocalApp` tool is available, publish the build to the app library:
+call it with `file_path` set to the absolute path of `dist/index.html`, the
+app's display name as `name` and one line on what it does as `summary`. For an
+app published before, pass its `id` instead of a name, so the new build replaces
+it and keeps its stored data; `LocalApp` with `action: "list"` finds the id.
+The app opens from the card under the tool call and from the Apps page. A
+publish warning about network loads or workers names something to fix in the
+source; fix it and build again.
+
+Without `LocalApp`, open the built page in the user's default browser:
+`open dist/index.html` on macOS, `xdg-open dist/index.html` on Linux,
+`start "" dist\index.html` on Windows.
 
 Then tell the user, in their language:
 
-- the app's name and the full path of its `dist/index.html`, which they can
+- the app's name and where it opens: the card and the Apps page when it was
+  published, otherwise the full path of its `dist/index.html`, which they can
   bookmark or open again from there;
-- that its data stays in this browser on this computer: another browser, a
-  private window, or clearing site data starts empty;
+- where its data stays: in the app library on this device when it was
+  published; otherwise in this browser on this computer, where another browser,
+  a private window, or clearing site data starts empty;
 - the SHORT trial checklist from the plan, as steps they can perform;
 - the status line exactly: `已构建，待你试用`.
 
@@ -205,6 +227,7 @@ user tries it; a problem they report is a change request.
 When the user asks to change an app that already exists (its folder holds the
 template's `package.json`), do not scaffold again and do not repeat the opening
 interview. Plan the change in plan mode, keeping the app's template, get it
-approved, implement it, build, and deliver again. Stored data must survive the
-change: when the shape of stored records changes, migrate them (raise the
-IndexedDB version and convert in `onupgradeneeded`) instead of dropping them.
+approved, implement it, build, and deliver again; a published app is published
+again with its `id`. Stored data must survive the change: when the shape of
+stored records changes, migrate them (raise the IndexedDB version and convert
+in `onupgradeneeded`) instead of dropping them.

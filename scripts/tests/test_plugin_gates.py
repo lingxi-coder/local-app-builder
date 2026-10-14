@@ -97,6 +97,15 @@ class CheckPluginTest(ScratchRepo):
             )
         self.assert_fails(CHECK_PLUGIN, "vite.config.mjs lost 'assetsInlineLimit: () => true'")
 
+    def test_lost_single_file_build_fails(self) -> None:
+        for family in FAMILIES:
+            self.edit(
+                TEMPLATES / family / "r4" / "vite.config.mjs",
+                "plugins: [react(), singleFileDocument()],",
+                "plugins: [react()],",
+            )
+        self.assert_fails(CHECK_PLUGIN, "vite.config.mjs lost 'plugins: [react(), singleFileDocument()]'")
+
     def test_host_bridge_reference_fails(self) -> None:
         path = self.path(PLUGIN / "skills" / "react-best-practices" / "SKILL.md")
         path.write_text(path.read_text(encoding="utf-8") + "\nCall `window.lingxi.v2.data.mutate`.\n", encoding="utf-8")

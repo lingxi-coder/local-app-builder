@@ -2,10 +2,12 @@
 """The local-app-builder plugin's checked-in contract.
 
 The plugin is skills plus template assets and nothing else: no agents,
-workflows, MCP servers or hooks, and no host tool its skills depend on. The
-model plans in plan mode, writes source with Write/Edit and builds with Bash.
-The generated app is a page the user opens from disk, so the templates must
-keep the build settings that make `file://` work.
+workflows, MCP servers or hooks. The model plans in plan mode, writes source
+with Write/Edit and builds with Bash; the one host tool a skill names is
+LingXi's built-in `LocalApp`, used only where the host offers it. The
+generated app is ONE page that `LocalApp` publishes or the user opens from
+disk, so the templates must keep the build settings that make it one file
+that works from `file://`.
 
 Every rule names the regression it stops. `--repo` points the gate at another
 checkout; `scripts/tests/test_plugin_gates.py` uses it to prove each rule can
@@ -87,14 +89,16 @@ PACKAGE_MANAGER = "pnpm@12.5.1"
 NODE_ENGINES = "^20.19.0 || >=22.12.0"
 EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
-# What makes `dist/index.html` work when it is opened from disk (the comments in
-# the template's `vite.config.mjs` say why). Losing any one of them breaks the
-# page in the browser while the build still succeeds.
+# What makes `dist/index.html` the whole app, working when it is opened from
+# disk and when `LocalApp` publishes it alone (the comments in the template's
+# `vite.config.mjs` say why). Losing any one of them breaks the page while the
+# build still succeeds.
 FILE_URL_BUILD = {
     'base: "./"': "relative asset URLs",
     'format: "iife"': "a classic-script bundle (a file:// page refuses ES modules)",
     "assetsInlineLimit: () => true": "every imported asset inlined (a file:// page cannot fetch a sibling file)",
-    '"<script defer src="': "the entry tag rewritten to a classic script",
+    "plugins: [react(), singleFileDocument()]": "the bundle inlined into dist/index.html (LocalApp publishes one file)",
+    "copyPublicDir: false": "nothing copied next to the page",
 }
 
 # Strings that only exist when the plugin talks to a host that is gone: the
