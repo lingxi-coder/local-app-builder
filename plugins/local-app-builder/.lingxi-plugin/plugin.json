@@ -1,8 +1,8 @@
 {
   "name": "local-app-builder",
   "displayName": "Local App Builder",
-  "version": "2.1.0",
-  "description": "Plan, scaffold and build local web apps from templates, then publish them to LingXi's app library or open them in the browser.",
+  "version": "3.0.0",
+  "description": "Build desktop Local Apps with repeatable installation, local backends, independent windows, and verified delivery through LocalApp.",
   "author": {
     "name": "LingXi"
   },

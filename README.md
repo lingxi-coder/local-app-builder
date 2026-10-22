@@ -1,18 +1,10 @@
 # local-app-builder
 
-A LingXi plugin that helps the model build local web apps. It plans the app with the user, scaffolds it from one of five
-templates, implements it and builds it with pnpm into ONE self-contained file, `dist/index.html`. Where LingXi offers its
-built-in `LocalApp` tool, that file is published to the device's app library (the app opens from a card in the chat and from
-the Apps page); otherwise the user's desktop browser opens it from disk. The app uses standard web APIs only and keeps its
-data on that device.
+A LingXi plugin for creating and maintaining local applications. Desktop projects can use multiple files, Vite/TypeScript, Node/Python backends and declared native capabilities. Missing runtimes and dependencies are installed through Bash. The app's install, build and startup recipe is recorded in `lingxi-app.json`, then published with `LocalApp` into the desktop Apps library and opened in an independent window.
 
-It extends LingXi's built-in app builder. The Android and iOS apps build simple apps without any plugin: their `local-app`
-skill writes one HTML document and publishes it with `LocalApp`. This plugin adds what that cannot: React, Ionic and the
-game-engine templates, the design and engine knowledge, and a real build.
+The built-in host skill supplies the current runtime contract. Android/iOS retain their document-only workflow; desktop does not inherit those restrictions. The bundled single-file templates remain optional building blocks. Existing design and browser-testing skills are reused, and the registered app is tested before delivery.
 
-The plugin is skills and template assets only. It declares no agents, workflows, MCP servers or hooks. Its skills use plan
-mode, `AskUserQuestion`, Write/Edit and Bash as for any other task; the one host tool they name is `LocalApp`, and only
-where the host offers it.
+This plugin contains skills and template assets. It uses ordinary Bash/Read/Write/Edit tools plus the host's LocalApp tool, rather than embedding another agent runtime.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
