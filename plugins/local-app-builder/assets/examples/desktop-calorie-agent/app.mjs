@@ -1,8 +1,14 @@
-import { MealAgentClient, terminalStates } from './agent-client.mjs';
+import { MealAgentClient, terminalStates, revisionStorage } from './agent-client.mjs';
 import { nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord } from './nutrition.mjs';
 
 const $ = (id) => document.getElementById(id);
-const agent = window.localApp?.agent;
+let agent = window.localApp?.agent;
+let taskStorage;
+let hostError = '';
+if (agent) {
+  try { taskStorage = revisionStorage(sessionStorage, (await window.localApp.info()).revision); }
+  catch (failure) { agent = null; hostError = `无法读取应用运行版本：${failure.message}。请重新打开应用。`; }
+}
 const historyKey = 'meal-notes.records.v1';
 let image = null;
 let stream = null;
@@ -56,6 +62,11 @@ function setPhoto(source) {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/jpeg', .86);
+  client?.forgetCompleted();
+  result = null;
+  completedRunId = null;
+  resultRunId = null;
+  $('result').hidden = true;
   image = { media_type: 'image/jpeg', base64: dataUrl.split(',')[1] };
   $('photo').src = dataUrl;
   stopCamera();
@@ -168,7 +179,7 @@ function renderResult(value) {
 
 const phases = { starting: '正在连接模型…', thinking: '正在识别餐食…', tool: '正在处理结果…',
   waiting_for_permission: '请在 LingXi 宿主窗口中处理工具授权。', waiting_for_answer: '请在 LingXi 宿主窗口中回答待确认问题。' };
-const client = agent ? new MealAgentClient(agent, sessionStorage, (event) => {
+const client = agent ? new MealAgentClient(agent, taskStorage, (event) => {
   if (event.type === 'progress') {
     $('status').textContent = phases[event.phase] || '正在处理…';
     return;
@@ -264,7 +275,7 @@ $('save').addEventListener('click', () => {
 window.addEventListener('pagehide', () => { stopCamera(); client?.dispose(); });
 try { renderHistory(); } catch (failure) { error(failure.message); }
 if (!client) {
-  $('status').textContent = '请从支持 Agent 的 LingXi Desktop Apps 中打开。此示例不在手机或普通浏览器中调用 Agent。';
+  $('status').textContent = hostError || '请从支持 Agent 的 LingXi Desktop Apps 中打开。此示例不在手机或普通浏览器中调用 Agent。';
 } else {
   setBusy(true);
   client.resume().then((runId) => {

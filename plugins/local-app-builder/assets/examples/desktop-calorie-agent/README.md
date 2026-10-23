@@ -6,6 +6,8 @@ The photo is resized to at most 1536 pixels on its longest edge and sent as JPEG
 
 `agent-client.mjs` saves the exact pending request in sessionStorage before submission and removes it after the host returns a run ID. If an IPC response is lost, an explicit Retry uses that same request ID/payload; refresh does not resubmit it. A rejected or unconfirmed request can be explicitly discarded using the acknowledgment and discard button, then the user can choose a new photo. Discarding its recovery record does not claim to cancel a possibly accepted host task. Cancel itself never submits an unconfirmed request. After acceptance, refresh only reconnects to the existing task. Photos are therefore temporarily retained in the current app tab until acceptance or explicit discard, never added to saved meal history. An unavailable storage quota prevents starting an unrecoverable request. Terminal failure, interruption and cancellation are displayed; they are never automatically rerun. The UI uses only text nodes for model output.
 
+Selecting a replacement photo clears the previous result and completed-task recovery record, so the old estimate cannot be saved for a new photo or reappear after refresh. Recovery keys are scoped to the running revision returned by `localApp.info()`; a version switch never restores or replays an earlier version's task. Saved meal history stays available across versions.
+
 ## Files
 
 - `index.html`, `styles.css`, `app.mjs`: camera/file input, busy/cancel states, result editing and app-local records.

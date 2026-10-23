@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { MealAgentClient } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/agent-client.mjs';
+import { MealAgentClient, revisionStorage } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/agent-client.mjs';
 import { checkedResult, calorieRange, mealRecord, recognitionPrompt } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs';
 
 const food = { name: 'Rice', grams: 150, kcalPer100gMin: 120, kcalPer100gMax: 150, basis: 'model_estimate', sources: [] };
@@ -112,6 +112,45 @@ test('storage failure prevents starting a task that cannot recover its request i
   const client = new MealAgentClient({ async run() { ran = true; } }, storage, () => {});
   await assert.rejects(client.submit({ requestId: 'request-1', prompt: 'meal' }), /QuotaExceededError/);
   assert.equal(ran, false);
+});
+
+test('replacing a photo forgets only a completed run and refresh never restores its old result', async () => {
+  const storage = memoryStorage();
+  let listener, reads = 0, unsubscribed = 0;
+  const agent = {
+    async run() { return { runId: 'run-1' }; },
+    subscribe(_id, callback) { listener = callback; return () => { unsubscribed++; }; },
+    async get() { reads++; return state(1); },
+  };
+  const seen = [];
+  const client = new MealAgentClient(agent, storage, event => seen.push(event));
+  await client.submit({ requestId: 'photo-1', prompt: 'meal' });
+  assert.throws(() => client.forgetCompleted(), /当前任务结束/);
+  listener({ type: 'state', runId: 'run-1', sequence: 2, run: state(2, 'succeeded') });
+  client.forgetCompleted();
+  assert.equal(client.runId, null);
+  assert.equal(unsubscribed, 1);
+  listener({ type: 'state', runId: 'run-1', sequence: 3, run: state(3, 'succeeded') });
+  assert.equal(seen.length, 2, 'late events for the previous photo cannot update the UI');
+  const refreshed = new MealAgentClient(agent, storage, () => assert.fail('old result restored'));
+  assert.equal(await refreshed.resume(), null);
+  assert.equal(reads, 1, 'choosing a new photo removes the old reconnect identity');
+  storage.setItem('meal-notes.agent.pending', JSON.stringify({ requestId: 'unconfirmed', prompt: 'meal' }));
+  assert.throws(() => refreshed.forgetCompleted(), /未确认/);
+});
+
+test('version changes never restore or replay the previous version task or unconfirmed photo', async () => {
+  const storage = memoryStorage();
+  const previous = revisionStorage(storage, 1);
+  previous.setItem('meal-notes.agent.run', 'previous-version-run');
+  previous.setItem('meal-notes.agent.pending', JSON.stringify({ requestId: 'previous-photo', prompt: 'meal' }));
+  const agent = { run() { assert.fail('previous photo replayed'); }, get() { assert.fail('previous version accessed'); } };
+  const next = new MealAgentClient(agent, revisionStorage(storage, 2), () => assert.fail('previous result restored'));
+  assert.equal(await next.resume(), null);
+  assert.equal(next.pending, null);
+  next.forgetCompleted();
+  assert.equal(previous.getItem('meal-notes.agent.run'), 'previous-version-run');
+  assert.throws(() => revisionStorage(storage, 0), /运行版本/);
 });
 
 test('desktop example declares only camera and agent and keeps provider access in the host', async () => {

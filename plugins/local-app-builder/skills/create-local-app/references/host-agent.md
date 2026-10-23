@@ -62,6 +62,8 @@ Persist request identity before crossing IPC. Retrying an identical request ID a
 
 Page reload only reconnects. Closing the window cancels tasks by default; background execution needs a separate Agent background grant. App stop, permission revocation, deletion and code-version replacement cancel tasks. Unsubscribe listeners and stop camera tracks on page teardown; do not call `cancel` during a normal reload. Do not silently recreate a cancelled/interrupted task or auto-save model output.
 
+Scope recovery keys to the running revision from `await window.localApp.info()`. A newer version must not restore or replay an earlier version's request. When the user replaces a photo after a completed task, clear both its displayed result and its reconnect identity so the old estimate cannot be saved for the new photo or restored after refresh.
+
 For nutrition, show food candidates, portion assumptions and calorie ranges; let the user adjust grams before saving. The included example has no nutrition tools and labels all output as model estimates. If a later version adds a host-approved nutrition tool, keep its actual source references with the result and distinguish sourced density values from image-estimated portions. Never claim a database lookup merely because a model returned a citation.
 
 ## Verification

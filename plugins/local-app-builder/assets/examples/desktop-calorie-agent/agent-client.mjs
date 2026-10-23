@@ -2,6 +2,16 @@ export const terminalStates = new Set(['succeeded', 'failed', 'cancelled', 'inte
 const pendingKey = 'meal-notes.agent.pending';
 const runKey = 'meal-notes.agent.run';
 
+export function revisionStorage(storage, revision) {
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('应用运行版本不可用，请重新打开应用。');
+  const key = (name) => `revision-${revision}:${name}`;
+  return {
+    getItem: (name) => storage.getItem(key(name)),
+    setItem: (name, value) => storage.setItem(key(name), value),
+    removeItem: (name) => storage.removeItem(key(name)),
+  };
+}
+
 /** Reconnect to a host-owned task without resubmitting a new request. */
 export class MealAgentClient {
   constructor(agent, storage, onEvent) {
@@ -9,6 +19,7 @@ export class MealAgentClient {
     this.storage = storage;
     this.onEvent = onEvent;
     this.runId = null;
+    this.state = null;
     this.lastSequence = -1;
     this.unsubscribe = null;
     this.submitting = false;
@@ -49,10 +60,12 @@ export class MealAgentClient {
   async watch(runId) {
     this.dispose();
     this.runId = runId;
+    this.state = null;
     this.lastSequence = -1;
     const accept = (event) => {
       if (event.runId !== this.runId || event.sequence <= this.lastSequence) return;
       this.lastSequence = event.sequence;
+      if (event.type === 'state') this.state = event.run.state;
       this.onEvent(event);
     };
     this.unsubscribe = this.agent.subscribe(runId, accept);
@@ -67,6 +80,18 @@ export class MealAgentClient {
     if (this.runId) await this.agent.cancel(this.runId);
   }
 
+  forgetCompleted() {
+    if (this.submitting || this.pending || (this.runId && !terminalStates.has(this.state))) {
+      throw new Error('请先等待当前任务结束，或处理未确认的请求，再更换照片。');
+    }
+    // A new photo must not restore the previous photo's result after refresh.
+    this.storage.removeItem(runKey);
+    this.dispose();
+    this.runId = null;
+    this.state = null;
+    this.lastSequence = -1;
+  }
+
   discardPending(confirmed = false) {
     if (!confirmed) throw new Error('请先确认放弃未确认的请求。');
     if (this.submitting) throw new Error('请求仍在提交，请等待返回后再放弃。');
@@ -77,6 +102,7 @@ export class MealAgentClient {
     this.storage.removeItem(runKey);
     this.dispose();
     this.runId = null;
+    this.state = null;
     this.lastSequence = -1;
     return true;
   }
