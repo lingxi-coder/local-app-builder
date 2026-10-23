@@ -6,6 +6,8 @@ The built-in host skill supplies the current runtime contract. Android/iOS retai
 
 This plugin contains skills and template assets. It uses ordinary Bash/Read/Write/Edit tools plus the host's LocalApp tool, rather than embedding another agent runtime.
 
+Desktop hosts that expose `window.localApp.agent` also support app-owned Agent tasks: images, validated structured results and tools individually authorized in the host. The plugin's guidance uses this bridge and keeps credentials, model selection and approvals in LingXi. The creating chat is not the running app's context. Mobile's document-only contract is unchanged.
+
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
 ## Install
@@ -30,6 +32,7 @@ every change to the plugin.
 | `plugins/local-app-builder/skills/create-local-app` | the flow: plan, scaffold, implement, build, deliver |
 | `plugins/local-app-builder/skills/*` | the references the flow loads: design, accessibility, React, Ionic, and one per drawn-surface engine |
 | `plugins/local-app-builder/assets/templates` | `catalog.json` and the five templates, each pinned to exact versions with a pnpm lockfile |
+| `plugins/local-app-builder/assets/examples/desktop-calorie-agent` | Desktop camera/choose-photo Agent example with estimated calorie ranges, editable portions and explicit app-local save |
 | `scripts/checks` | the gates; `scripts/check-all.sh` runs every one of them |
 | `scripts/tests` | the gates' negative probes (`test_plugin_gates.py`) and the template library tests (`test-local-app-r4-libs.mjs`) |
 | `docs/local-apps` | design history (Chinese) from when Local Apps were a host feature; it describes code that no longer exists |
@@ -58,6 +61,7 @@ To try a template by hand, copy it out first (the gate rejects build output insi
 
     ./scripts/check-all.sh
     node --test scripts/tests/test-local-app-r4-libs.mjs
+    node --test scripts/tests/test-desktop-calorie-agent.mjs
 
 ## History
 

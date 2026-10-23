@@ -20,6 +20,16 @@ When `LocalApp` advertises `bundle_path`, use the Desktop project flow. A local 
 
 First publication does not grant permissions. The desktop host asks once for requested application capabilities. A later launch reuses its recorded install/start recipe without a model. Closing normally stops it; the user may enable background running in Apps. Quitting LingXi stops all app processes.
 
+## Apps that call an Agent
+
+When a Desktop app needs image recognition, structured model output or authorized tool use, read `${LINGXI_SKILL_DIR}/references/host-agent.md`. Use `window.localApp.agent` only when the current host skill advertises it. The host runs an independent task with its selected model and explicit tool grants; the app must not embed provider keys or reuse the chat that created it. Do not use Remote Control as a same-device Agent API.
+
+When authoring a tool-enabled app, call `LocalApp({"action":"agent_catalog"})` from the creating chat to discover public model and opaque tool IDs. This read-only catalog requires no app ID, contains no connection configuration or credentials, and grants no permission. Do not guess MCP IDs; the app runtime still exposes only `agent.run/get/subscribe/cancel`.
+
+Start from `${LINGXI_SKILL_DIR}/../../assets/examples/desktop-calorie-agent` for a camera/choose-photo → structured result → editable portions → explicit save example. Copy it into a new project before editing; publish the complete directory with `bundle_path`. This Desktop-only example intentionally has no business tools. Its nutrition estimates and recording logic belong to the app, not to the generic host API.
+
+Persist a request ID before submitting, preserve it on explicit uncertain retries, and reconnect accepted tasks using `get`/`subscribe` after reload. Reload must not automatically resubmit an unconfirmed or rejected request. Let the user explicitly discard its recovery record before replacing input, with a clear notice that this does not cancel a possibly accepted task. Handle all terminal states, failed capability checks, denial and cancellation. Display only validated structured output on `succeeded`. Keep approval and questions in the trusted host UI. Test both the registered app and actual configured model; unit tests and standalone browser rendering are not end-to-end proof.
+
 ## Mobile and standalone documents
 
 A host whose LocalApp schema only accepts `html`/`file_path` uses its document-only skill and limits. For a framework build destined for that host, the existing templates produce `dist/index.html`; publish that file. Never offer desktop native/process APIs on mobile. Without a LocalApp tool, a user-requested standalone web page may open in the browser, and must be described as such.

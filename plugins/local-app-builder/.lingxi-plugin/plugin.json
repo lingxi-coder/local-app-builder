@@ -1,8 +1,8 @@
 {
   "name": "local-app-builder",
   "displayName": "Local App Builder",
-  "version": "3.0.0",
-  "description": "Build desktop Local Apps with repeatable installation, local backends, independent windows, and verified delivery through LocalApp.",
+  "version": "3.1.0",
+  "description": "Build desktop Local Apps with host Agent tasks, camera input, local backends, independent windows, and verified delivery through LocalApp.",
   "author": {
     "name": "LingXi"
   },
