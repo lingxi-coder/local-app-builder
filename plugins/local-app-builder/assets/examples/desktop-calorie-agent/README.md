@@ -1,29 +1,28 @@
-# 餐盘笔记 — schema-2 host Agent example
+# 餐盘笔记 — schema-2 Local App Agent example
 
-This dependency-free static Local App demonstrates the real `window.localApp.agent` API. Copy this directory into a project and publish the complete directory with `LocalApp({ "bundle_path": "/absolute/copied/project" })`, then start it. In the trusted Apps UI, enable this App's Agent and select a configured model that supports images and structured output. Allow camera access to test capture, or use Choose photo. No provider secret or extra backend is required.
+This dependency-free static Local App demonstrates the current task SDK. Copy the directory into a project and publish it with `LocalApp({"bundle_path":"/absolute/copied/project"})`. In the trusted Apps UI, enable the App Agent and select a configured model that supports image input and structured output. The app uses the browser's standard file picker or camera API; provider credentials and model calls stay in the host.
 
-The photo is resized to at most 1536 pixels on its longest edge and sent as JPEG after the user presses Recognize. The app requests a schema with food candidates, estimated grams, calorie density ranges, assumptions and questions. It grants no business tools, so every result is explicitly a **model estimate**, not a nutrition database measurement. Users can correct names and gram weights before pressing Save. Changing food identity requires a new estimate; changing its displayed name does not invent a new calorie density. Saved app-local records retain original estimates and user changes, but not photo bytes.
+The selected photo is resized to a JPEG `File` before the user presses Recognize. The app sends it in `attachments` with a schema for food candidates, estimated grams, calorie ranges, assumptions and questions. It grants no tools, so results remain model estimates rather than nutrition database measurements. Users can correct names and gram weights before explicitly saving. Saved meal records keep original estimates and edits, never photo bytes.
 
-`agent-client.mjs` saves the exact pending request in sessionStorage on Desktop or app-origin localStorage in the Mobile external browser before submission and removes it after the host returns a run ID. If an IPC response is lost, an explicit Retry uses that same request ID/payload; refresh does not resubmit it. A rejected or unconfirmed request can be explicitly discarded using the acknowledgment and discard button, then the user can choose a new photo. Discarding its recovery record does not claim to cancel a possibly accepted host task. Cancel itself never submits an unconfirmed request. After acceptance, refresh only reconnects to the existing task. Photos are therefore temporarily retained in the recovery store until acceptance or explicit discard (on Mobile this can survive closing a browser tab), never added to saved meal history. An unavailable storage quota prevents starting an unrecoverable request. Terminal failure, interruption and cancellation are displayed; they are never automatically rerun. The UI uses only text nodes for model output.
+`agent-client.mjs` saves a temporary app draft and its `File` in revision-scoped IndexedDB before `tasks.start`; that copy expires after 24 hours and is cleared on definitive host rejection. The browser SDK also preserves the exact request during the iOS foreground wake-and-return handoff. It submits only after the native host returns with the matching request ID readiness marker. A plain reload never resubmits; the app checks `tasks.list` for the same `requestId` and reconnects to an admitted task. If no task exists, the user can explicitly retry the unchanged draft while it remains saved. The SDK's separate ledger keeps pending data at most 24 hours and accepted idempotency receipts for 7 days, with 32-record/100 MiB caps. Page Promises are not treated as durable.
 
-Selecting a replacement photo clears the previous result and completed-task recovery record, so the old estimate cannot be saved for a new photo or reappear after refresh. Recovery keys are scoped to the running revision returned by `localApp.info()`; a version switch never restores or replays an earlier version's task. Saved meal history stays available across versions.
+The sample cleans up the temporary photo after task admission and never adds it to saved meal history. Task result output is validated by both the host schema and app-specific range/provenance checks. Failures, interruption and cancellation remain visible; none are automatically rerun. Text renders through text nodes.
 
 ## Files
 
-- `index.html`, `styles.css`, `app.mjs`: camera/file input, busy/cancel states, result editing and app-local records.
-- `agent-client.mjs`: idempotent submission and sequence-aware reconnect.
-- `nutrition.mjs`: Draft 7 schema and business validation. Nutrition semantics do not belong in the generic Agent host.
-- `lingxi-app.json`: schema-2 static entry with `camera`, `photos` and `agent`, and no tool grants.
+- `index.html`, `styles.css`, `app.mjs`: file/camera input, task progress and cancellation, result editing, and app-local records.
+- `agent-client.mjs`: revision-scoped IndexedDB draft recovery and durable task reconnect.
+- `nutrition.mjs`: JSON Schema and app-specific range/provenance checks.
+- `lingxi-app.json`: schema-2 static entry with `agent` and `camera` capabilities and no tool grants. Camera access still uses the browser's and OS's capture permission prompts.
 
-The example needs a host advertising `localApp.agent`. A plain browser previews the UI without model execution. Mobile pages open in external Safari/Chrome, never an embedded WebView. They load `/__local_app_sdk.js` from the exact running app gateway; Desktop keeps its preload SDK. Mobile browser camera/photo inputs and Desktop standard camera/file input share the same compressed Agent DTO. Safari/Chrome own site permissions and site-data removal; LingXi does not clear browser records when stopping/removing an app. The return-to-LingXi button opens trusted tool approvals and model settings, without exposing an approval API to the page. Android keeps a visible runtime notification while in the browser. iOS has only a finite system background budget: submit, return to LingXi to wait/approve, then return to the browser; if the host pauses, explicitly resume in LingXi and reopen its fresh run URL. Connection loss never automatically resubmits a model request. Desktop/schema-2 and Mobile physical acceptance must be recorded separately; source tests do not prove either.
+Mobile pages open in the system-selected external browser, never an embedded WebView. The app feature-detects browser camera and file APIs; it does not select Safari or Chrome by name. Browser permissions and browser site data remain under the browser's control. `localApp.host.open()` returns to trusted approvals/settings and does not expose a page approval API. Android uses a user-visible runtime notification. iOS execution has a finite foreground continuation lease; do not describe it as an always-on background service. Source tests and standalone previews do not prove physical-device behavior.
 
 ## Checks
 
-From the plugin repository:
+From the builder repository:
 
 ```sh
 node --test scripts/tests/test-desktop-calorie-agent.mjs
-./scripts/check-all.sh
 ```
 
-Unit tests cover calorie range semantics, provenance rejection, edited/saved portions, lost-response retry, refresh recovery, event reordering, cancellation and storage failure. These do not prove live model behavior. For end-to-end acceptance, publish/start the registered App, choose a photo, confirm it before sending, verify the real validated output, edit a portion, save and reload. Also test host model absence, denied camera/Agent, a nonfood image, cancellation and reload during a running task. Retain the signed host package and provider evidence with the implementation acceptance report.
+These tests cover app-side nutrition validation and durable task recovery with a fake host. They do not prove live model behavior. Device acceptance still needs a registered App, configured model, real photo, cancellation and refresh while a task runs.

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Attachment Review Chat</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./app.mjs"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">LOCAL APP · DURABLE CHAT</p>
+        <h1>Attachment Review</h1>
+        <p>Start a review chat, attach files, and return to its saved history later.</p>
+      </header>
+      <section class="toolbar" aria-label="Chat controls">
+        <label for="chat-list">Saved chats</label>
+        <select id="chat-list"><option value="">No chat selected</option></select>
+        <button id="new-chat" type="button">New chat</button>
+        <button id="archive-chat" type="button" disabled>Archive</button>
+        <button id="delete-chat" type="button" class="quiet" disabled>Delete</button>
+      </section>
+      <p id="status" role="status" aria-live="polite">Loading the Local App host…</p>
+      <p id="recovery-warning" class="draft" role="status" hidden></p>
+      <section id="messages" class="messages" aria-label="Chat history"></section>
+      <section class="composer" aria-label="Send a review message">
+        <label class="skill-choice"><input id="use-skill" type="checkbox" checked> Use the packaged review Skill</label>
+        <label for="prompt">What should the reviewer look for?</label>
+        <textarea id="prompt" rows="3" placeholder="Summarize the files and list concrete questions."></textarea>
+        <div class="actions">
+          <button id="attach" type="button">Choose files</button>
+          <span id="file-names">No files selected</span>
+          <button id="clear-draft" type="button" class="quiet" hidden>Forget saved draft</button>
+          <button id="cancel" type="button" class="quiet" hidden>Cancel current turn</button>
+          <button id="send" type="button" class="primary" disabled>Send</button>
+        </div>
+        <p id="draft" class="draft" hidden></p>
+      </section>
+      <input id="file-input" type="file" multiple accept=".pdf,.txt,.md,.csv,image/*" hidden>
+      <footer>Files are sent once with the request. The host controls the model and permissions; this page contains no provider credentials.</footer>
+    </main>
+  </body>
+</html>

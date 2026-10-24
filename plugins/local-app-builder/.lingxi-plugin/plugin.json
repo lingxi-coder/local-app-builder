@@ -1,8 +1,8 @@
 {
   "name": "local-app-builder",
   "displayName": "Local App Builder",
-  "version": "4.0.0",
-  "description": "Build schema-2 Local Apps for Desktop and mobile with independent host Agent tasks, camera input, approved services and verified delivery.",
+  "version": "5.0.0",
+  "description": "Build schema-2 Local Apps for Desktop and mobile with host Agent runs and tasks, durable Chats, generic File attachments, packaged Skills and approved services.",
   "author": {
     "name": "LingXi"
   },

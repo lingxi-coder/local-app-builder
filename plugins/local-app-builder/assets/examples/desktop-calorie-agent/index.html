@@ -17,11 +17,9 @@
       <p class="fine">点击识别后，照片和补充说明会交给 LingXi 中为此应用选择的模型。照片不保存在餐食记录中；未确认受理的请求可能临时保留照片，以便你明确选择重试或放弃。</p>
       <div class="actions"><button id="analyze" class="primary" type="button" disabled>识别这一餐</button><button id="cancel" type="button" hidden>取消识别</button></div>
       <div id="pending-review" hidden>
-        <p>上次请求未确认受理。重试会使用同一张照片和请求编号；重新选择照片前，请先明确放弃此请求。若原请求已启动，放弃这里只会移除本应用的恢复记录，并不会取消宿主任务。</p>
-        <label><input id="discard-confirm" type="checkbox"> 我了解以上情况，放弃原请求并重新选择照片</label>
-        <button id="discard-pending" type="button" disabled>放弃原请求，重新选图</button>
+        <p>上次请求尚未确认受理。恢复会使用同一请求编号和照片；页面刷新不会自动提交。若宿主已经受理，请从任务列表恢复结果。</p>
       </div>
-      <p id="ios-host-note" class="fine" hidden>iPhone 识别提交后，请返回灵犀等待结果或处理审批，再返回浏览器查看。若本地服务已暂停，请先返回灵犀恢复；原请求不会自动重新提交。</p>
+      <p id="ios-host-note" class="fine" hidden>提交后，灵犀会先完成前台接续，再由浏览器发送照片和说明。若页面恢复，任务列表会重新连接到同一请求。</p>
       <button id="host-open" type="button" hidden>返回灵犀处理授权或恢复连接</button>
       <p id="status" role="status" aria-live="polite">请先选择一张照片。</p><p id="error" role="alert" hidden></p>
     </section>

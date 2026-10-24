@@ -6,7 +6,7 @@ The built-in host skill supplies the current runtime contract. Desktop, Android 
 
 This plugin contains skills and template assets. It uses ordinary Bash/Read/Write/Edit tools plus the host's LocalApp tool, rather than embedding another agent runtime.
 
-Hosts that expose `window.localApp.agent` also support app-owned Agent tasks: images, validated structured results and tools individually authorized in the host. The plugin's guidance uses this bridge and keeps credentials, model selection and approvals in LingXi. The creating chat is not the running app's context. Mobile source support uses the same task contract and native authorization, with physical acceptance still pending.
+Hosts that expose `window.localApp.agent` also support app-owned tasks, durable Chats, standard browser `File` attachments and Skills individually authorized by the host. The plugin's guidance uses this bridge and keeps credentials, model selection and approvals in LingXi. The creating chat is not the running app's context. Mobile source support uses the same task contract and native authorization, with physical acceptance still pending.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
@@ -17,10 +17,11 @@ app bundles the plugin. The Android and iOS apps add the `lingxi` marketplace wh
 a domestic mirror, once one exists) and install nothing; the user installs the plugin from Settings → Plugins. On a
 computer, add this repository as a marketplace (`lingxi-coder/local-app-builder`) and install `local-app-builder@lingxi`.
 
-On a phone, static apps use the web target. Framework builds and Node/Python services require the managed Mobile Linux runtime and exact-release consent. Dependencies stay app-local. Mobile background Agent execution is currently unsupported.
+On a phone, static apps use the web target. Framework builds and Node/Python services require the managed Mobile Linux runtime and exact-release consent. Dependencies stay app-local. Agent tasks follow OS lifecycle limits: Android keeps a user-visible runtime notification and iOS uses a finite foreground continuation lease; neither is an always-on background worker.
 
-An installed copy updates only to a new `version` in `plugins/local-app-builder/.lingxi-plugin/plugin.json`, so bump it with
-every change to the plugin.
+Version 5.0.0 replaces the prior Agent bridge contract with `agent.run` and durable `tasks`/`chats`, plus standard browser
+`File` attachments. It does not retain old aliases or the images API. An installed copy updates only when the
+`version` in `plugins/local-app-builder/.lingxi-plugin/plugin.json` changes, so bump it with every plugin release.
 
 ## Layout
 
@@ -32,6 +33,7 @@ every change to the plugin.
 | `plugins/local-app-builder/skills/*` | the references the flow loads: design, accessibility, React, Ionic, and one per drawn-surface engine |
 | `plugins/local-app-builder/assets/templates` | `catalog.json` and the five templates, each pinned to exact versions with a pnpm lockfile |
 | `plugins/local-app-builder/assets/examples/desktop-calorie-agent` | Desktop camera/choose-photo Agent example with estimated calorie ranges, editable portions and explicit app-local save |
+| `plugins/local-app-builder/assets/examples/attachment-chat-skill` | durable Chat, user-selected file attachments, retryable drafts and a packaged Skill with no tool grants |
 | `scripts/checks` | the gates; `scripts/check-all.sh` runs every one of them |
 | `scripts/tests` | the gates' negative probes (`test_plugin_gates.py`) and the template library tests (`test-local-app-r4-libs.mjs`) |
 | `docs/local-apps` | design history (Chinese) from when Local Apps were a host feature; it describes code that no longer exists |

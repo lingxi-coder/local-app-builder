@@ -6,11 +6,7 @@
     "type": "static",
     "path": "index.html"
   },
-  "capabilities": [
-    "agent",
-    "camera",
-    "photos"
-  ],
+  "capabilities": ["agent", "camera"],
   "agent": {
     "tools": []
   },
