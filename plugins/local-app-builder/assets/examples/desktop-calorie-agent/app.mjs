@@ -75,8 +75,23 @@ function setPhoto(source) {
   setBusy(false);
 }
 
+async function nativePhoto(method) {
+  const value = await method();
+  if (!value) return;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(value.mimeType) || typeof value.base64 !== 'string') {
+    throw new Error('请选择 JPEG、PNG 或 WebP 照片。');
+  }
+  const photo = new Image();
+  photo.src = `data:${value.mimeType};base64,${value.base64}`;
+  await photo.decode();
+  setPhoto(photo);
+}
 $('camera-open').addEventListener('click', async () => {
   try {
+    if (window.localApp?.camera?.capture) {
+      await nativePhoto(() => window.localApp.camera.capture());
+      return;
+    }
     stopCamera();
     const generation = cameraGeneration;
     const requestedStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
@@ -96,7 +111,12 @@ $('camera-open').addEventListener('click', async () => {
   }
 });
 $('camera-close').addEventListener('click', stopCamera);
-$('photo-choose').addEventListener('click', () => $('photo-file').click());
+$('photo-choose').addEventListener('click', async () => {
+  try {
+    if (window.localApp?.photos?.pick) await nativePhoto(() => window.localApp.photos.pick());
+    else $('photo-file').click();
+  } catch (failure) { error(failure.message); }
+});
 $('camera-capture').addEventListener('click', () => {
   try { setPhoto($('camera')); } catch (failure) { error(failure.message); }
 });

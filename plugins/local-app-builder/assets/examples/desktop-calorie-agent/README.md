@@ -1,4 +1,4 @@
-# 餐盘笔记 — Desktop Agent example
+# 餐盘笔记 — schema-2 host Agent example
 
 This dependency-free static Local App demonstrates the real `window.localApp.agent` API. Copy this directory into a project and publish the complete directory with `LocalApp({ "bundle_path": "/absolute/copied/project" })`, then start it. In the trusted Apps UI, enable this App's Agent and select a configured model that supports images and structured output. Allow camera access to test capture, or use Choose photo. No provider secret or extra backend is required.
 
@@ -13,9 +13,9 @@ Selecting a replacement photo clears the previous result and completed-task reco
 - `index.html`, `styles.css`, `app.mjs`: camera/file input, busy/cancel states, result editing and app-local records.
 - `agent-client.mjs`: idempotent submission and sequence-aware reconnect.
 - `nutrition.mjs`: Draft 7 schema and business validation. Nutrition semantics do not belong in the generic Agent host.
-- `lingxi-app.json`: Desktop static entry with only `camera` and `agent`, and no tool grants.
+- `lingxi-app.json`: schema-2 static entry with `camera`, `photos` and `agent`, and no tool grants.
 
-The example needs the Desktop runtime. A plain browser can show its UI but cannot call an Agent. Mobile continues using its existing document contract until its host implements and advertises an Agent bridge.
+The example needs a host advertising `localApp.agent`. A plain browser previews the UI without model execution. Native mobile camera/photos and Desktop standard camera/file input share the same compressed Agent DTO. Desktop/schema-2 and Mobile physical acceptance must be recorded separately; source tests do not prove either.
 
 ## Checks
 

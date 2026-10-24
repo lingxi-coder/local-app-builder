@@ -1,12 +1,12 @@
 # local-app-builder
 
-A LingXi plugin for creating and maintaining local applications. Desktop projects can use multiple files, Vite/TypeScript, Node/Python backends and declared native capabilities. Missing runtimes and dependencies are installed through Bash. The app's install, build and startup recipe is recorded in `lingxi-app.json`, then published with `LocalApp` into the desktop Apps library and opened in an independent window.
+A LingXi plugin for creating schema-2 Local Apps on Desktop, Android and iOS. Projects may use static frontends or approved Node/Python services when the native execution target supports them. Keep dependencies app-local, record the install/build/start recipe in `lingxi-app.json`, and publish through LocalApp into the device Apps library.
 
-The built-in host skill supplies the current runtime contract. Android/iOS retain their document-only workflow; desktop does not inherit those restrictions. The bundled single-file templates remain optional building blocks. Existing design and browser-testing skills are reused, and the registered app is tested before delivery.
+The built-in host skill supplies the current runtime contract. Desktop, Android and iOS use schema 2 with platform-specific execution targets and device capabilities. The bundled single-file templates remain optional building blocks. Existing design and browser-testing skills are reused, and the registered app is tested before delivery.
 
 This plugin contains skills and template assets. It uses ordinary Bash/Read/Write/Edit tools plus the host's LocalApp tool, rather than embedding another agent runtime.
 
-Desktop hosts that expose `window.localApp.agent` also support app-owned Agent tasks: images, validated structured results and tools individually authorized in the host. The plugin's guidance uses this bridge and keeps credentials, model selection and approvals in LingXi. The creating chat is not the running app's context. Mobile's document-only contract is unchanged.
+Hosts that expose `window.localApp.agent` also support app-owned Agent tasks: images, validated structured results and tools individually authorized in the host. The plugin's guidance uses this bridge and keeps credentials, model selection and approvals in LingXi. The creating chat is not the running app's context. Mobile source support uses the same task contract and native authorization, with physical acceptance still pending.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).
 
@@ -17,8 +17,7 @@ app bundles the plugin. The Android and iOS apps add the `lingxi` marketplace wh
 a domestic mirror, once one exists) and install nothing; the user installs the plugin from Settings → Plugins. On a
 computer, add this repository as a marketplace (`lingxi-coder/local-app-builder`) and install `local-app-builder@lingxi`.
 
-On a phone, `create-local-app` sends simple apps to the built-in `local-app` skill and asks the user to create a
-framework or game-engine app from LingXi on a computer: the pnpm build needs Node.js.
+On a phone, static apps use the web target. Framework builds and Node/Python services require the managed Mobile Linux runtime and exact-release consent. Dependencies stay app-local. Mobile background Agent execution is currently unsupported.
 
 An installed copy updates only to a new `version` in `plugins/local-app-builder/.lingxi-plugin/plugin.json`, so bump it with
 every change to the plugin.

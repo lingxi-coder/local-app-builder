@@ -153,10 +153,13 @@ test('version changes never restore or replay the previous version task or uncon
   assert.throws(() => revisionStorage(storage, 0), /运行版本/);
 });
 
-test('desktop example declares only camera and agent and keeps provider access in the host', async () => {
+test('schema-2 example declares camera, photos and agent and keeps provider access in the host', async () => {
   const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
   const manifest = JSON.parse(await readFile(new URL('lingxi-app.json', base), 'utf8'));
-  assert.deepEqual(manifest.capabilities, ['agent', 'camera']);
+  assert.equal(manifest.schema, 2);
+  assert.deepEqual(manifest.capabilities, ['agent', 'camera', 'photos']);
+  assert.ok(manifest.targets.some(target => target.platform === 'android'));
+  assert.ok(manifest.targets.some(target => target.platform === 'ios'));
   assert.deepEqual(manifest.agent.tools, []);
   const source = await readFile(new URL('app.mjs', base), 'utf8');
   assert.match(source, /window\.localApp\?\.agent/);
