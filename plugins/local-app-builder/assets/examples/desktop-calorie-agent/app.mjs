@@ -295,7 +295,7 @@ $('save').addEventListener('click', () => {
 window.addEventListener('pagehide', () => { stopCamera(); client?.dispose(); });
 try { renderHistory(); } catch (failure) { error(failure.message); }
 if (!client) {
-  $('status').textContent = hostError || '请从支持 Agent 的 LingXi Desktop Apps 中打开。此示例不在手机或普通浏览器中调用 Agent。';
+  $('status').textContent = hostError || '请从支持 Agent 的灵犀应用库中打开，并在应用详情中选择模型与授权。普通浏览器无法调用宿主 Agent。';
 } else {
   setBusy(true);
   client.resume().then((runId) => {
