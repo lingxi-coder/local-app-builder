@@ -167,3 +167,21 @@ test('schema-2 example declares camera, photos and agent and keeps provider acce
   assert.match(source, /createImageBitmap/);
   assert.doesNotMatch(source, /fetch\(|api[_-]?key|window\.lingxi|innerHTML/i);
 });
+
+
+test('browser disconnection does not corrupt task sequence or replay an Agent request', async () => {
+  let receive; let runs = 0; const events=[];
+  const agent = {
+    run: async () => { runs++; return {runId:'run-1'}; },
+    subscribe: (_id, listener) => { receive=listener; return () => {}; },
+    get: async () => state(3),
+  };
+  const client = new MealAgentClient(agent, memoryStorage(), event=>events.push(event));
+  await client.watch('run-1');
+  receive({type:'connection',runId:'run-1',error:{code:'host_unavailable',message:'paused'}});
+  receive({type:'state',runId:'run-1',sequence:2,run:state(2)});
+  receive({type:'state',runId:'run-1',sequence:4,run:state(4,'succeeded')});
+  assert.equal(events.length,3);
+  assert.equal(events[1].type,'connection'); assert.equal(events[2].run.state,'succeeded');
+  assert.equal(client.lastSequence,4); assert.equal(runs,0);
+});
