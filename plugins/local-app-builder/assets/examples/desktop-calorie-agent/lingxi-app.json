@@ -41,8 +41,7 @@
       "index.html",
       "styles.css",
       "app.mjs",
-      "nutrition.mjs",
-      "agent-client.mjs"
+      "nutrition.mjs"
     ],
     "dependencyLocks": []
   },

@@ -1,28 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-import { webcrypto } from 'node:crypto';
-import { MealAgentClient, revisionStorage } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/agent-client.mjs';
 import { checkedResult, calorieRange, mealRecord, recognitionPrompt } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs';
 
 const food = { name: 'Rice', grams: 150, kcalPer100gMin: 120, kcalPer100gMax: 150, basis: 'model_estimate', sources: [] };
-const result = () => ({ items: [{ ...food }], assumptions: ['Cooking oil is unknown'], questions: ['How much rice?'] });
-function memoryStorage() {
-  const values = new Map();
-  return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
-}
-function memoryDrafts() {
-  let request = null;
-  return { async get() { return request; }, async put(value) { request = value; }, async delete() { request = null; } };
-}
-const state = (sequence, status = 'running') => ({ runId: 'run-1', state: status, sequence, updatedAt: 5, result: { text: 'done', output: result(), attachments: [] } });
+const result = () => ({ items: [{...food}], assumptions: ['Cooking oil is unknown'], questions: ['How much rice?'] });
 
 test('edits scale estimates without silently replacing model assumptions or provenance', () => {
   const checked = checkedResult(result());
-  assert.deepEqual(calorieRange(checked.items), { min: 180, max: 225 });
-  const record = mealRecord(checked, [{ name: 'Cooked rice', grams: '200' }], 'run-1', new Date('2026-10-23T12:00:00Z'));
-  assert.deepEqual(record.range, { min: 240, max: 300 });
+  assert.deepEqual(calorieRange(checked.items), {min: 180, max: 225});
+  const record = mealRecord(checked, [{name: 'Cooked rice', grams: '200'}], 'run-1', new Date('2026-10-23T12:00:00Z'));
+  assert.deepEqual(record.range, {min: 240, max: 300});
   assert.equal(record.items[0].estimatedGrams, 150);
   assert.equal(record.items[0].estimatedName, 'Rice');
   assert.equal(record.items[0].basis, 'model_estimate');
@@ -32,304 +20,294 @@ test('edits scale estimates without silently replacing model assumptions or prov
 });
 
 test('inverted ranges, invalid edited portions, and unearned database provenance are rejected', () => {
-  assert.throws(() => checkedResult({ ...result(), items: [{ ...food, kcalPer100gMin: 200 }] }));
+  assert.throws(() => checkedResult({...result(), items: [{...food, kcalPer100gMin: 200}]}));
   for (const grams of ['', 0, -1, Infinity, 'unknown', 10001]) {
-    assert.throws(() => mealRecord(result(), [{ name: 'Rice', grams }], 'run-1'));
+    assert.throws(() => mealRecord(result(), [{name: 'Rice', grams}], 'run-1'));
   }
-  assert.throws(() => checkedResult({ ...result(), items: [{ ...food, basis: 'nutrition_source', sources: ['invented database'] }] }));
-  assert.throws(() => checkedResult({ ...result(), items: [{ ...food, sources: ['invented database'] }] }));
+  assert.throws(() => checkedResult({...result(), items: [{...food, basis: 'nutrition_source', sources: ['invented database']}]}));
+  assert.throws(() => checkedResult({...result(), items: [{...food, sources: ['invented database']}]}));
   assert.match(recognitionPrompt(), /no tools/);
   assert.match(recognitionPrompt(), /do not invent/);
 });
 
 test('empty food result is explainable but cannot be saved as a meal', () => {
-  const empty = checkedResult({ items: [], assumptions: [], questions: ['Please photograph food.'] });
+  const empty = checkedResult({items: [], assumptions: [], questions: ['Please photograph food.']});
   assert.throws(() => mealRecord(empty, [], 'run-1'));
 });
 
-test('a lost task admission retries the same durable File request after page reload', async () => {
-  const storage = memoryStorage();
-  const drafts = memoryDrafts();
-  const inputs = [];
-  const request = { requestId: 'request-1', prompt: 'meal', attachments: [{ name: 'meal.jpg', type: 'image/jpeg', size: 5 }] };
-  let admitted = false;
-  const agent = {
-    tasks: {
-      async start(input) { inputs.push(input); if (inputs.length === 1) throw new Error('IPC disconnected'); admitted = true; return { runId: 'run-1' }; },
-      subscribe() { return () => {}; }, async get() { return state(1, 'succeeded'); },
-      async list() { return admitted ? [state(1, 'succeeded')] : []; },
-    },
-  };
-  const first = new MealAgentClient(agent, storage, () => {}, drafts);
-  await assert.rejects(first.submit(request));
-  const reloaded = new MealAgentClient(agent, storage, () => {}, drafts);
-  assert.equal(await reloaded.resume(), null);
-  assert.equal(inputs.length, 1, 'refresh never silently retries an unconfirmed request');
-  await assert.rejects(reloaded.submit({ requestId: 'must-not-replace', prompt: 'new photo must not silently replace the original' }), /待恢复/);
-  await reloaded.submit(request);
-  assert.deepEqual(inputs, [request, request]);
-  assert.equal(reloaded.pending, null, 'temporary file payload is removed after host acceptance');
-  const third = new MealAgentClient(agent, storage, () => {}, drafts);
-  await third.resume();
-  assert.equal(inputs.length, 2, 'accepted runs reconnect through get/subscribe, never run again');
-});
-
-test('a definitive host rejection clears the app-owned prompt and File draft', async () => {
-  const storage = memoryStorage();
-  const drafts = memoryDrafts();
-  const agent = {tasks: {async start() {
-    const error = new Error('Agent access is denied.');
-    error.definitive = true;
-    throw error;
-  }}};
-  const client = new MealAgentClient(agent, storage, () => {}, drafts);
-  await assert.rejects(client.submit({requestId: 'rejected-1', prompt: 'meal', attachments: [{name: 'meal.jpg', size: 5}]}), /denied/);
-  assert.equal(await drafts.get(), null);
-  assert.equal(client.pending, null);
-  assert.equal(storage.getItem('meal-notes.agent.pending'), null);
-});
-
-test('expired photo drafts clear in memory and cannot be resubmitted after the retention window', async () => {
-  const storage = memoryStorage();
-  storage.setItem('meal-notes.agent.pending', 'expired-1');
-  const drafts = {expired: true, async get() { return null; }, async put() {}, async delete() {}};
-  const received = [];
-  let starts = 0;
-  const client = new MealAgentClient({tasks: {async start() { starts++; return {runId: 'run-1'}; }}}, storage,
-    (event) => received.push(event), drafts);
-  client.pending = {requestId: 'expired-1', prompt: 'private', attachments: []};
-  assert.equal(await client.checkDraftExpiry(), true);
-  assert.equal(client.pending, null);
-  assert.equal(storage.getItem('meal-notes.agent.pending'), null);
-  assert.deepEqual(received, [{type: 'draft-expired'}]);
-
-  await assert.rejects(client.submit({requestId: 'expired-1', prompt: 'private', attachments: []}),
-    (error) => error.code === 'draft_expired');
-  assert.equal(starts, 0, 'expired bytes and request IDs are never replayed');
-});
-
-test('a crash after task admission removes the matching local File draft on resume', async () => {
-  const storage = revisionStorage(memoryStorage(), 1);
-  storage.setItem('meal-notes.agent.run', 'run-1');
-  const drafts = memoryDrafts();
-  await drafts.put({requestId: 'request-1', prompt: 'meal', attachments: []});
-  const task = {...state(1, 'succeeded'), requestId: 'request-1'};
-  let starts = 0;
-  const agent = {tasks: {
-    async start() { starts++; },
-    async get() { return task; },
-    subscribe() { return () => {}; },
-  }};
-  const client = new MealAgentClient(agent, storage, () => {}, drafts);
-  assert.equal(await client.resume(), 'run-1');
-  assert.equal(await drafts.get(), null);
-  assert.equal(starts, 0, 'resume observes the admitted task without resubmitting');
-});
-
-test('an unaccepted draft is preserved for explicit same-request retry and cannot be cancelled as a task', async () => {
-  const storage = memoryStorage();
-  const drafts = memoryDrafts();
-  const inputs = [];
-  const firstPhoto = { requestId: 'photo-1', prompt: 'meal', attachments: [{ name: 'first.jpg', type: 'image/jpeg', size: 5 }] };
-  let granted = false;
-  const agent = {
-    tasks: {
-      async start(input) { inputs.push(input); if (!granted) throw new Error('Agent access has not been granted for this application.'); return { runId: 'run-1' }; },
-      subscribe() { return () => {}; }, async get() { return state(1, 'succeeded'); }, async list() { return []; },
-      async cancel() { assert.fail('cannot cancel before admission'); },
-    },
-  };
-  const client = new MealAgentClient(agent, storage, () => {}, drafts);
-  await assert.rejects(client.submit(firstPhoto));
-  granted = true;
-  await client.resume();
-  assert.equal(inputs.length, 1, 'granting permission then refreshing must not run the rejected photo');
-  await client.submit(firstPhoto);
-  assert.deepEqual(inputs, [firstPhoto, firstPhoto]);
-  assert.equal(client.pending, null);
-});
-
-test('replay/get race and duplicate events cannot overwrite a terminal state', async () => {
-  const received = [];
-  let listener;
-  let unsubscribed = 0;
-  const agent = {
-    tasks: {
-      subscribe(_id, callback) { listener = callback; callback({ type: 'state', runId: 'run-1', sequence: 4, task: state(4, 'succeeded') }); return () => { unsubscribed++; }; },
-      async get() { return state(2); },
-      async cancel(runId) { assert.equal(runId, 'run-1'); },
-    },
-  };
-  const client = new MealAgentClient(agent, memoryStorage(), (event) => received.push(event), memoryDrafts());
-  await client.watch('run-1');
-  listener({ type: 'state', runId: 'other-app-run', sequence: 5, task: state(5) });
-  listener({ type: 'state', runId: 'run-1', sequence: 4, task: state(4, 'succeeded') });
-  assert.deepEqual(received.map((event) => event.task.state), ['succeeded']);
-  await client.cancel();
-  client.dispose();
-  assert.equal(unsubscribed, 1);
-});
-
-test('storage failure prevents starting a task that cannot recover its request identity', async () => {
-  let ran = false;
-  const storage = { getItem() { return null; }, setItem() { throw new Error('QuotaExceededError'); } };
-  const client = new MealAgentClient({ tasks: { async start() { ran = true; } } }, storage, () => {}, memoryDrafts());
-  await assert.rejects(client.submit({ requestId: 'request-1', prompt: 'meal' }), /QuotaExceededError/);
-  assert.equal(ran, false);
-});
-
-test('replacing a photo forgets only a completed run and refresh never restores its old result', async () => {
-  const storage = memoryStorage();
-  const drafts = memoryDrafts();
-  let listener, reads = 0, unsubscribed = 0;
-  const agent = {
-    tasks: {
-      async start() { return { runId: 'run-1' }; },
-      subscribe(_id, callback) { listener = callback; return () => { unsubscribed++; }; },
-      async get() { reads++; return state(1); },
-      async list() { return []; },
-    },
-  };
-  const seen = [];
-  const client = new MealAgentClient(agent, storage, event => seen.push(event), drafts);
-  await client.submit({ requestId: 'photo-1', prompt: 'meal' });
-  assert.throws(() => client.forgetCompleted(), /恢复或等待/);
-  listener({ type: 'state', runId: 'run-1', sequence: 2, task: state(2, 'succeeded') });
-  client.forgetCompleted();
-  assert.equal(client.runId, null);
-  assert.equal(unsubscribed, 1);
-  listener({ type: 'state', runId: 'run-1', sequence: 3, task: state(3, 'succeeded') });
-  assert.equal(seen.length, 2, 'late events for the previous photo cannot update the UI');
-  const refreshed = new MealAgentClient(agent, storage, () => assert.fail('old result restored'), drafts);
-  assert.equal(await refreshed.resume(), null);
-  assert.equal(reads, 1, 'choosing a new photo removes the old reconnect identity');
-  await drafts.put({ requestId: 'unconfirmed', prompt: 'meal' });
-  refreshed.pending = { requestId: 'unconfirmed' };
-  assert.throws(() => refreshed.forgetCompleted(), /恢复或等待/);
-});
-
-test('version changes never restore or replay the previous version task or unconfirmed photo', async () => {
-  const storage = memoryStorage();
-  const previous = revisionStorage(storage, 1);
-  previous.setItem('meal-notes.agent.run', 'previous-version-run');
-  const agent = { tasks: { start() { assert.fail('previous photo replayed'); }, get() { assert.fail('previous version accessed'); }, list() { assert.fail('previous version accessed'); } } };
-  const next = new MealAgentClient(agent, revisionStorage(storage, 2), () => assert.fail('previous result restored'), memoryDrafts());
-  assert.equal(await next.resume(), null);
-  assert.equal(next.pending, null);
-  next.forgetCompleted();
-  assert.equal(previous.getItem('meal-notes.agent.run'), 'previous-version-run');
-  assert.throws(() => revisionStorage(storage, 0), /运行版本/);
-});
-
-test('schema-2 example uses the external-browser Agent API and keeps provider access in the host', async () => {
+test('calorie example uses official AG-UI messages, ContentParts, results and lifecycle events', async () => {
   const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
   const manifest = JSON.parse(await readFile(new URL('lingxi-app.json', base), 'utf8'));
   assert.equal(manifest.schema, 2);
   assert.deepEqual(manifest.capabilities, ['agent', 'camera']);
-  assert.ok(manifest.targets.some(target => target.platform === 'android'));
-  assert.ok(manifest.targets.some(target => target.platform === 'ios'));
   assert.deepEqual(manifest.agent.tools, []);
+  assert.ok(manifest.targets.some((target) => target.platform === 'android'));
+  assert.ok(manifest.targets.some((target) => target.platform === 'ios'));
+  assert.deepEqual(manifest.package.files, ['index.html', 'styles.css', 'app.mjs', 'nutrition.mjs']);
+
   const source = await readFile(new URL('app.mjs', base), 'utf8');
-  assert.match(source, /window\.localApp\?\.agent/);
-  assert.match(source, /getUserMedia/);
-  assert.match(source, /attachments: \[image\]/);
-  assert.doesNotMatch(source, /fetch\(|api[_-]?key|window\.lingxi|innerHTML/i);
-  assert.doesNotMatch(source, /images:|agent\.run\(/);
-  const client = await readFile(new URL('agent-client.mjs', base), 'utf8');
-  assert.match(client, /agent\.tasks\.start/);
-  assert.match(client, /event\.task/);
-  assert.match(client, /draftTtlMs = 24 \* 60 \* 60 \* 1000/);
-  assert.match(client, /error\.definitive/);
+  for (const api of ['agent.createClient({threadId: crypto.randomUUID()})', 'await agent.file(image)',
+    "role: 'user'", "type: 'text'", 'runClient.addMessage', 'runClient.runAgent',
+    "'com.lingxi.localApp'", 'outputSchema: nutritionSchema', 'onRunErrorEvent',
+    'onRunFinishedEvent({outcome: terminalOutcome})', "outcome === 'cancelled'", 'runClient.abortRun()', 'mealRecord']) {
+    assert.ok(source.includes(api), `calorie example should use ${api}`);
+  }
+  assert.doesNotMatch(source, /fetch\(|api[_-]?key|OPENAI_API_KEY|window\.lingxi|innerHTML/i);
 });
 
-test('attachment chat example keeps a retryable File draft and uses the packaged Skill and durable Chat APIs', async () => {
+test('persistent chat restores the same thread read-only and starts runs only for new user turns', async () => {
   const base = new URL('../../plugins/local-app-builder/assets/examples/attachment-chat-skill/', import.meta.url);
   const manifest = JSON.parse(await readFile(new URL('lingxi-app.json', base), 'utf8'));
   assert.deepEqual(manifest.capabilities, ['agent']);
   assert.deepEqual(manifest.agent.tools, []);
-  assert.deepEqual(manifest.agent.skills, [{ id: 'review', path: 'skills/review/SKILL.md' }]);
+  assert.deepEqual(manifest.agent.skills, [{id: 'review', path: 'skills/review/SKILL.md'}]);
   const [source, skill] = await Promise.all([
     readFile(new URL('app.mjs', base), 'utf8'),
     readFile(new URL(manifest.agent.skills[0].path, base), 'utf8'),
   ]);
-  for (const api of ['agent.chats.create', 'agent.chats.list', 'agent.chats.open',
-    'agent.chats.archive', 'agent.chats.delete', 'handle.send', 'chat.history',
-    'chat.subscribe', 'chat.cancel']) {
-    assert.ok(source.includes(api), `example should demonstrate ${api}`);
+  for (const api of ['agent.chats.create', 'agent.chats.open', 'agent.createClient({threadId: chat.id, initialMessages: messages})',
+    'Array.isArray(page.chats)', 'page.nextCursor',
+    'chatHandle.history(options)', 'page.chats', 'client.setMessages(messages)', 'app.agent.tasks.get(draft.runId)',
+    'app.agent.createClient({threadId: task.threadId})', 'recoveryClient.connectAgent({runId: draft.runId}, recovery.subscriber)',
+    'client.setMessages([message])', 'client.runAgent({', 'app.agent.file(file)',
+    'runId: draft.runId', "'com.lingxi.localApp'", 'onRunErrorEvent', 'onRunFinishedEvent', 'metadata[\'com.lingxi.localApp\']',
+    "run.getOutcome() === 'cancelled'", 'client.abortRun()']) {
+    assert.ok(source.includes(api), `attachment-chat example should use ${api}`);
   }
-  assert.match(source, /attachments: attachments/);
-  assert.match(source, /\? \['review'\] : \[\]/);
-  assert.match(source, /pendingDraft\.requestId/);
+  const boot = source.slice(source.indexOf('async function boot()'), source.indexOf("$('attach').addEventListener"));
+  assert.doesNotMatch(boot, /runAgent\(/, 'startup restores a thread without starting a model request');
+  assert.match(source, /message\.content/);
   assert.match(source, /refresh will not send it automatically/i);
-  assert.match(source, /localApp:recovery-unavailable/);
   assert.match(source, /draftTtlMs = 24 \* 60 \* 60 \* 1000/);
-  assert.match(source, /error\.definitive/);
   assert.match(skill, /untrusted data/);
-  assert.doesNotMatch(source, /fetch\(|api[_-]?key|OPENAI_API_KEY|window\.lingxi|innerHTML/i);
+  assert.doesNotMatch(source, /api[_-]?key|OPENAI_API_KEY|window\.lingxi|innerHTML/i);
 });
 
-test('browser disconnection does not corrupt task sequence or replay an Agent request', async () => {
-  let receive; let runs = 0; const events=[];
-  const agent = {
-    tasks: {
-      start: async () => { runs++; return {runId:'run-1'}; },
-      subscribe: (_id, listener) => { receive=listener; return () => {}; },
-      get: async () => state(3),
+test('a refreshed chat reconnects a saved run by task identity and preserves RUN_ERROR drafts', async () => {
+  const base = new URL('../../plugins/local-app-builder/assets/examples/attachment-chat-skill/', import.meta.url);
+  const original = await readFile(new URL('app.mjs', base), 'utf8');
+  const source = original.replace(/\nvoid boot\(\)\.catch\(\(failure\) => setStatus\(failure\.message\)\);\s*$/, '');
+  assert.notEqual(source, original, 'test harness should replace the browser boot call');
+
+  class Element {
+    constructor(id = '') {
+      this.id = id;
+      this.value = '';
+      this.checked = false;
+      this.hidden = false;
+      this.disabled = false;
+      this.textContent = '';
+      this.children = [];
+      this.dataset = {};
+      this.listeners = new Map();
+    }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    replaceChildren(...children) { this.children = children; }
+    append(...children) { this.children.push(...children); }
+    add(child) { this.children.push(child); }
+    click() {}
+  }
+
+  const elements = new Map();
+  const document = {
+    visibilityState: 'visible',
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, new Element(id));
+      return elements.get(id);
+    },
+    createElement(tag) { return new Element(tag); },
+    addEventListener() {},
+  };
+  const historyMessage = {id: 'message-1', role: 'user', content: [{type: 'text', text: 'Keep this exact request'}]};
+  const calls = {createdClients: [], connects: [], starts: 0, taskLookups: [], chatLists: []};
+  const chat = {
+    id: 'chat-1',
+    async history() { return {messages: [historyMessage]}; },
+  };
+  const localApp = {
+    async info() { return {revision: 'rev-1'}; },
+    agent: {
+      chats: {
+        async list(options) {
+          calls.chatLists.push(options);
+          return calls.chatLists.length === 1
+            ? {chats: [{chatId: 'chat-1', title: 'Saved chat'}], nextCursor: 'cursor-1'}
+            : {chats: []};
+        },
+        async open(id) { assert.equal(id, 'chat-1'); return chat; },
+      },
+      tasks: {
+        async get(runId) {
+          calls.taskLookups.push(runId);
+          return {runId, threadId: 'chat-1', state: 'failed'};
+        },
+      },
+      createClient(options) {
+        calls.createdClients.push(options);
+        return {
+          messages: [...(options.initialMessages || [])],
+          setMessages(messages) { this.messages = [...messages]; },
+          async connectAgent(parameters, subscriber) {
+            calls.connects.push({options, parameters});
+            await subscriber.onRunErrorEvent({event: {
+              type: 'RUN_ERROR',
+              message: 'Provider disconnected',
+              code: 'provider_unavailable',
+            }});
+            return {result: undefined, newMessages: []};
+          },
+          async runAgent() { calls.starts += 1; return {result: {}, newMessages: []}; },
+          abortRun() {},
+        };
+      },
     },
   };
-  const client = new MealAgentClient(agent, memoryStorage(), event=>events.push(event), memoryDrafts());
-  await client.watch('run-1');
-  receive({type:'connection',runId:'run-1',error:{code:'host_unavailable',message:'paused'}});
-  receive({type:'state',runId:'run-1',sequence:2,task:state(2)});
-  receive({type:'state',runId:'run-1',sequence:4,task:state(4,'succeeded')});
-  assert.equal(events.length,3);
-  assert.equal(events[1].type,'connection'); assert.equal(events[2].task.state,'succeeded');
-  assert.equal(client.lastSequence,4); assert.equal(runs,0);
+  const context = {localApp};
+  const localStorage = {getItem() { return 'chat-1'; }, setItem() {}, removeItem() {}};
+  const Option = class { constructor(label, value) { this.label = label; this.value = value; } };
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const runFixture = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'File', 'confirm', 'setInterval', 'Option',
+    `${source}\nawait boot();\nreturn {sendTurn, pending: () => pendingDraft, setPending: (draft) => { pendingDraft = draft; }};`);
+  const fixture = await runFixture(context, document, {addEventListener() {}}, localStorage, class File {}, () => false, () => 0, Option);
+  const draft = {chatId: 'chat-1', runId: 'run-1', messageId: 'message-1', prompt: 'Keep this exact request', files: [], skills: []};
+  fixture.setPending(draft);
+
+  await fixture.sendTurn();
+
+  assert.deepEqual(calls.chatLists, [
+    {limit: 50, includeArchived: false},
+    {limit: 50, includeArchived: false, cursor: 'cursor-1'},
+  ]);
+  assert.deepEqual(calls.taskLookups, ['run-1']);
+  assert.deepEqual(calls.createdClients[1], {threadId: 'chat-1'}, 'recovery client has no initial messages or remembered run ID');
+  assert.deepEqual(calls.connects, [{options: {threadId: 'chat-1'}, parameters: {runId: 'run-1'}}]);
+  assert.equal(calls.starts, 0, 'RUN_ERROR recovery must not start a model request');
+  assert.equal(fixture.pending(), draft, 'the exact retry input and run ID remain saved after RUN_ERROR');
+  assert.match(elements.get('status').textContent, /Provider disconnected/);
+  assert.match(elements.get('status').textContent, /remain saved/);
 });
 
-test('browser SDK fails closed when its durable request ledger is unavailable', async (t) => {
-  const sdkPath = new URL('../../../harness-runtime/crates/runtime/src/mobile/unified_local_apps/browser_sdk.js', import.meta.url);
-  let source;
-  try { source = await readFile(sdkPath, 'utf8'); }
-  catch (error) {
-    if (error.code === 'ENOENT') { t.skip('requires the sibling harness-runtime checkout'); return; }
-    throw error;
+test('a persistent Chat run sends only its new user Message, not historical File bytes', async () => {
+  const base = new URL('../../plugins/local-app-builder/assets/examples/attachment-chat-skill/', import.meta.url);
+  const original = await readFile(new URL('app.mjs', base), 'utf8');
+  const source = original.replace(/\nvoid boot\(\)\.catch\(\(failure\) => setStatus\(failure\.message\)\);\s*$/, '');
+  assert.notEqual(source, original, 'test harness should replace the browser boot call');
+
+  class Element {
+    constructor(id = '') {
+      this.id = id;
+      this.value = '';
+      this.checked = false;
+      this.hidden = false;
+      this.disabled = false;
+      this.textContent = '';
+      this.children = [];
+      this.dataset = {};
+      this.listeners = new Map();
+    }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    replaceChildren(...children) { this.children = children; }
+    append(...children) { this.children.push(...children); }
+    add(child) { this.children.push(child); }
+    click() {}
   }
-  source = source.replace('__LINGXI_APP_CONFIGURATION__', JSON.stringify({
-    appId: 'app-test', name: 'Test', revision: 3, hostPlatform: 'android', runId: 'run-test', capabilities: ['agent'], services: []
-  }));
-  const events = [];
-  const window = {
-    top: null,
-    isSecureContext: false,
+
+  const elements = new Map();
+  const document = {
+    visibilityState: 'visible',
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, new Element(id));
+      return elements.get(id);
+    },
+    createElement(tag) { return new Element(tag); },
     addEventListener() {},
-    dispatchEvent(event) { events.push(event); return true; }
   };
-  window.top = window;
-  const document = {visibilityState: 'visible', addEventListener() {}};
-  let fetches = 0;
-  const context = {
-    window, document, navigator: {},
-    location: {origin: 'http://127.0.0.1:32123', href: 'http://127.0.0.1:32123/__run/run-test/index.html'},
-    history: {state: null, replaceState() {}},
-    crypto: webcrypto,
-    TextEncoder,
-    CustomEvent: class { constructor(type, init = {}) { this.type = type; this.detail = init.detail; } },
-    fetch: async () => { fetches++; throw new Error('fetch should not happen'); },
-    setInterval: () => 1,
-    clearTimeout,
+  const oldFileBytes = Buffer.from('HISTORICAL_FILE_BYTES_MUST_NOT_BE_RESENT').toString('base64');
+  let history = [
+    {id: 'old-user', role: 'user', content: [
+      {type: 'text', text: 'Review this earlier file.'},
+      {type: 'document', source: {type: 'data', value: oldFileBytes, mimeType: 'text/plain'}, metadata: {filename: 'old.txt'}},
+    ]},
+    {id: 'old-assistant', role: 'assistant', content: 'The earlier file was reviewed.'},
+  ];
+  const calls = {runInputs: [], clients: []};
+  const chat = {
+    id: 'chat-1',
+    async history() { return {messages: structuredClone(history)}; },
   };
-  runInNewContext(source, context);
-  const sdk = window.localApp;
-  assert.equal(typeof sdk.agent.run, 'function');
-  assert.equal(typeof sdk.agent.tasks.start, 'function');
-  assert.equal(typeof sdk.agent.chats.open, 'function');
-  assert.equal(typeof sdk.files.pick, 'function');
-  assert.equal(sdk.agent.images, undefined);
-  await assert.rejects(
-    runInNewContext("window.localApp.agent.tasks.start({prompt:'must be persisted first'})", context),
-    (error) => error.code === 'storage_unavailable'
-  );
-  assert.equal(fetches, 0, 'the host receives nothing when request identity and input cannot be durably saved');
-  assert.ok(events.some((event) => event.type === 'localApp:recovery-unavailable'));
+  const localApp = {
+    async info() { return {revision: 'rev-1'}; },
+    agent: {
+      chats: {
+        async list() { return {chats: [{chatId: 'chat-1', title: 'Saved chat'}]}; },
+        async open(id) { assert.equal(id, 'chat-1'); return chat; },
+      },
+      createClient(options) {
+        calls.clients.push(options);
+        return {
+          messages: [...(options.initialMessages || [])],
+          setMessages(messages) { this.messages = [...messages]; },
+          async runAgent(parameters, subscriber) {
+            const input = {
+              threadId: options.threadId,
+              runId: parameters.runId,
+              messages: structuredClone(this.messages),
+              forwardedProps: parameters.forwardedProps,
+            };
+            calls.runInputs.push(input);
+            const newAssistant = {id: 'new-assistant', role: 'assistant', content: 'The new turn was reviewed.'};
+            history = [...history, ...structuredClone(this.messages), newAssistant];
+            await subscriber.onRunFinishedEvent({outcome: 'success'});
+            return {result: undefined, newMessages: [newAssistant]};
+          },
+          abortRun() {},
+        };
+      },
+    },
+  };
+  const context = {localApp, crypto: {randomUUID: (() => { let id = 0; return () => `generated-${++id}`; })()}};
+  const localStorage = {getItem() { return 'chat-1'; }, setItem() {}, removeItem() {}};
+  const Option = class { constructor(label, value) { this.label = label; this.value = value; } };
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const runFixture = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'File', 'confirm', 'setInterval', 'Option',
+    `${source}\nawait boot();\nreturn {sendTurn};`);
+  const fixture = await runFixture(context, document, {addEventListener() {}}, localStorage, class File {}, () => false, () => 0, Option);
+  elements.get('prompt').value = 'Review only the new turn.';
+
+  await fixture.sendTurn();
+
+  assert.equal(calls.runInputs.length, 1);
+  assert.equal(calls.runInputs[0].threadId, 'chat-1');
+  assert.equal(calls.runInputs[0].messages.length, 1, 'the host owns historical context for this persistent thread');
+  assert.equal(calls.runInputs[0].messages[0].role, 'user');
+  assert.equal(calls.runInputs[0].messages[0].content[0].text, 'Review only the new turn.');
+  assert.equal(JSON.stringify(calls.runInputs[0]).includes(oldFileBytes), false, 'historical file bytes must not be sent again');
+  assert.equal(history.length, 4, 'history remains canonical and includes both completed turns');
+  assert.equal(calls.clients.length, 1, 'the same persistent thread client is reused for the new turn');
+});
+
+test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent contract', async () => {
+  const root = new URL('../../', import.meta.url);
+  const [plugin, readme, skill, reference] = await Promise.all([
+    readFile(new URL('plugins/local-app-builder/.lingxi-plugin/plugin.json', root), 'utf8'),
+    readFile(new URL('README.md', root), 'utf8'),
+    readFile(new URL('plugins/local-app-builder/skills/create-local-app/SKILL.md', root), 'utf8'),
+    readFile(new URL('plugins/local-app-builder/skills/create-local-app/references/host-agent.md', root), 'utf8'),
+  ]);
+  assert.equal(JSON.parse(plugin).version, '6.0.0');
+  for (const document of [readme, skill, reference]) {
+    assert.match(document, /AG-UI 1\.0/);
+    assert.match(document, /RunAgentInput/);
+  }
+  assert.match(reference, /Message\[\]/);
+  assert.match(reference, /ContentPart/);
+  assert.match(reference, /BaseEvent/);
+  assert.match(reference, /forwardedProps[\s\S]{0,100}com\.lingxi\.localApp/);
+  assert.match(reference, /exactly one user `Message`/);
+  assert.match(reference, /audio and video parts are unsupported/);
+  assert.match(reference, /nextCursor/);
+  assert.match(reference, /onRunFinishedEvent\(\{outcome: terminalOutcome\}\)/);
+  assert.match(reference, /connectAgent\(\{runId\},/);
+  assert.match(reference, /read-only/);
+  assert.match(reference, /finite OS execution lease/);
 });

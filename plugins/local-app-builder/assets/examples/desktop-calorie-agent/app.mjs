@@ -1,37 +1,50 @@
-// Desktop supplies its preload SDK; Mobile loads the authenticated browser SDK.
-if (!globalThis.localApp && location.hostname === '127.0.0.1') {
+// Desktop supplies its preload SDK; Mobile loads the authenticated external-browser SDK.
+if (!globalThis.localApp) {
   try { await import('/__local_app_sdk.js'); }
   catch { /* The UI below explains how to reopen this app from LingXi. */ }
 }
 
-import { MealAgentClient, MealDraftStore, terminalStates, revisionStorage } from './agent-client.mjs';
 import { nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord } from './nutrition.mjs';
 
 const $ = (id) => document.getElementById(id);
-$('host-open').hidden = !window.localApp?.host?.open;
+const agent = window.localApp?.agent;
+$('host-open').hidden = typeof window.localApp?.host?.open !== 'function';
 $('host-open').addEventListener('click', () => window.localApp?.host?.open());
-let agent = window.localApp?.agent;
-let taskStorage;
-let draftStore;
+
+function clearOldAgentCaches() {
+  for (const getStorage of [() => globalThis.localStorage, () => globalThis.sessionStorage]) {
+    try {
+      const storage = getStorage();
+      for (let index = storage.length - 1; index >= 0; index--) {
+        const key = storage.key(index);
+        if (key && /^revision-\d+:meal-notes\.agent\.(pending|run)$/.test(key)) storage.removeItem(key);
+      }
+    } catch {}
+  }
+  if (globalThis.indexedDB) {
+    const request = indexedDB.deleteDatabase('meal-notes-agent-drafts');
+    request.onerror = () => console.warn('Could not remove the retired meal Agent draft database.');
+    request.onblocked = () => console.warn('The retired meal Agent draft database is still open in another tab.');
+  }
+}
+clearOldAgentCaches();
+
 let hostError = '';
 if (agent) {
   try {
     const info = await window.localApp.info();
     $('ios-host-note').hidden = info.hostPlatform !== 'ios';
-    // The external browser can open a fresh page after the native handoff.
-    taskStorage = revisionStorage(info.platform === 'mobile-browser' ? localStorage : sessionStorage, info.revision);
-    draftStore = new MealDraftStore(info.revision);
-  }
-  catch (failure) { agent = null; hostError = `无法读取应用运行版本：${failure.message}。请重新打开应用。`; }
+  } catch (failure) { hostError = `无法读取应用运行信息：${failure.message}。请重新打开应用。`; }
 }
+
 const historyKey = 'meal-notes.records.v1';
 let image = null;
 let imageUrl = null;
 let stream = null;
 let result = null;
 let busy = false;
+let runClient = null;
 let completedRunId = null;
-let resultRunId = null;
 let cameraGeneration = 0;
 
 function error(message) {
@@ -41,14 +54,13 @@ function error(message) {
 
 function setBusy(value) {
   busy = value;
-  $('analyze').disabled = busy || !agent || (!image && !client?.pending);
-  $('analyze').textContent = client?.pending ? '恢复同一请求' : '识别这一餐';
-  $('cancel').hidden = !busy || Boolean(client?.pending) || !client?.runId;
-  $('pending-review').hidden = busy || !client?.pending;
-  $('camera-open').disabled = busy || Boolean(client?.pending);
-  $('photo-file').disabled = busy || Boolean(client?.pending);
-  $('photo-choose').disabled = busy || Boolean(client?.pending);
-  $('notes').disabled = busy || Boolean(client?.pending);
+  $('analyze').disabled = busy || !agent || !image;
+  $('analyze').textContent = '识别这一餐';
+  $('cancel').hidden = !busy;
+  $('camera-open').disabled = busy;
+  $('photo-file').disabled = busy;
+  $('photo-choose').disabled = busy;
+  $('notes').disabled = busy;
 }
 
 function stopCamera() {
@@ -92,21 +104,17 @@ async function photoFile(source) {
   }
 }
 
-function showPhoto(file, replacing = true) {
+function showPhoto(file) {
   if (!file || !(file instanceof File)) throw new Error('请选择一张照片。');
-  if (replacing) {
-    client?.forgetCompleted();
-    result = null;
-    completedRunId = null;
-    resultRunId = null;
-    $('result').hidden = true;
-  }
+  result = null;
+  completedRunId = null;
+  $('result').hidden = true;
   image = file;
   if (imageUrl) URL.revokeObjectURL(imageUrl);
   imageUrl = URL.createObjectURL(file);
   $('photo').src = imageUrl;
   stopCamera();
-  $('status').textContent = '照片已准备好，确认后点击识别。';
+  $('status').textContent = '照片已准备好。点击识别后会启动一个新的 Agent 线程。';
   error('');
   setBusy(false);
 }
@@ -221,57 +229,73 @@ function renderResult(value) {
   updateTotal();
 }
 
-const phases = { queued: '请求已提交…', running: '正在识别餐食…', waiting_for_permission: '请在 LingXi 宿主窗口中处理工具授权。', waiting_for_answer: '请在 LingXi 宿主窗口中回答待确认问题。' };
-const client = agent ? new MealAgentClient(agent, taskStorage, (event) => {
-  if (event.type === 'draft-expired') {
-    setBusy(false);
-    $('status').textContent = '照片重试草稿已超过 24 小时并已删除；没有请求被自动重新提交。请重新选择照片。';
-    return;
-  }
-  if (event.type === 'connection') {
-    error(event.error.message);
-    $('status').textContent = '连接已暂停；请返回灵犀恢复应用。不会自动重新提交识别请求。';
-    return;
-  }
-  const task = event.task;
-  setBusy(!terminalStates.has(task.state));
-  if (task.state === 'succeeded') {
-    completedRunId = task.runId;
-    if (resultRunId !== task.runId) {
-      try { renderResult(task.result?.output); resultRunId = task.runId; }
-      catch (failure) { error(failure.message); $('status').textContent = '结果未通过应用校验，请重试。'; return; }
-    }
-    $('status').textContent = '识别完成。请确认食物与份量，再保存记录。';
-  } else if (terminalStates.has(task.state)) {
-    $('status').textContent = task.state === 'cancelled' ? '识别已取消。' : task.state === 'interrupted' ? '任务已中断，请手动重试。' : '识别失败。';
-    error(task.error ? `${task.error.message} (${task.error.code})` : '');
-  } else $('status').textContent = phases[task.phase] || phases[task.state] || '正在处理…';
-}, draftStore) : null;
-
 $('analyze').addEventListener('click', async () => {
-  if (busy || !client || (!image && !client.pending)) return;
+  if (busy || !agent || !image) return;
   error('');
   stopCamera();
   $('result').hidden = true;
   result = null;
   completedRunId = null;
-  resultRunId = null;
+  runClient = agent.createClient({threadId: crypto.randomUUID()});
+  const runId = crypto.randomUUID();
   setBusy(true);
+  $('status').textContent = '正在准备 AG-UI 1.0 消息…';
+
+  let runError = null;
+  let outcome;
   try {
-    const request = client.pending ?? { requestId: crypto.randomUUID(), prompt: recognitionPrompt($('notes').value),
-      attachments: [image], outputSchema: nutritionSchema, tools: [], maxTurns: 4, timeoutMs: 120000 };
-    await client.submit(request);
+    const imagePart = await agent.file(image);
+    runClient.addMessage({
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: [{type: 'text', text: recognitionPrompt($('notes').value)}, imagePart],
+    });
+    $('status').textContent = '正在识别餐食…';
+    const response = await runClient.runAgent({
+      runId,
+      forwardedProps: {
+        'com.lingxi.localApp': {
+          version: 1,
+          outputSchema: nutritionSchema,
+          tools: [],
+          maxTurns: 4,
+          timeoutMs: 120000,
+        },
+      },
+    }, {
+      onEvent({event}) {
+        if (event.type === 'STEP_STARTED') $('status').textContent = '正在分析餐食…';
+      },
+      onRunErrorEvent({event}) { runError = event; },
+      onRunFinishedEvent({outcome: terminalOutcome}) { outcome = terminalOutcome; },
+    });
+
+    if (runError) throw new Error(`${runError.message}${runError.code ? ` (${runError.code})` : ''}`);
+    if (outcome === 'cancelled') {
+      $('status').textContent = '宿主确认识别已取消。';
+      return;
+    }
+    if (outcome === 'interrupt') {
+      $('status').textContent = '识别已暂停。请返回 LingXi 处理授权或待确认问题。';
+      return;
+    }
+    if (outcome !== 'success') throw new Error('宿主没有报告成功的 AG-UI 终止事件。');
+    renderResult(response.result);
+    completedRunId = runId;
+    $('status').textContent = '识别完成。请确认食物与份量，再保存记录。';
   } catch (failure) {
-    error(failure.code === 'draft_expired'
-      ? `${failure.message}不会自动重试或恢复这条旧请求。`
-      : failure.definitive
-      ? `${failure.message}。宿主未接受请求，已清除保存的请求和照片。调整后再重新提交。`
-      : `${failure.message}。可在确认原请求状态后重试同一请求；请先在 LingXi 的 Apps 中检查本应用的 Agent 授权和模型。`);
+    error(`${failure.message}。本次结果没有保存。请检查授权或网络后由你决定是否重新识别。`);
+    $('status').textContent = '识别未完成；没有自动重新提交。';
+  } finally {
+    runClient = null;
     setBusy(false);
   }
 });
-$('cancel').addEventListener('click', async () => {
-  try { await client.cancel(); } catch (failure) { error(`取消未确认：${failure.message}`); }
+
+$('cancel').addEventListener('click', () => {
+  if (!runClient) return;
+  runClient.abortRun();
+  $('status').textContent = '已请求取消；等待宿主报告最终状态。';
 });
 
 function readHistory() {
@@ -298,8 +322,10 @@ function renderHistory() {
     $('history').append(article);
   }
 }
+
 $('save').addEventListener('click', () => {
   try {
+    if (!completedRunId) throw new Error('没有可保存的已完成估算。');
     const record = mealRecord(result, edits(), completedRunId);
     const records = readHistory();
     localStorage.setItem(historyKey, JSON.stringify([record, ...records.filter((item) => item.id !== record.id)]));
@@ -308,27 +334,11 @@ $('save').addEventListener('click', () => {
     error('');
   } catch (failure) { error(`未保存：${failure.message}`); }
 });
-window.addEventListener('pagehide', () => { stopCamera(); client?.dispose(); });
-const checkDraftExpiry = () => {
-  if (document.visibilityState === 'visible') void client?.checkDraftExpiry().catch((failure) => error(`无法检查照片草稿过期状态：${failure.message}`));
-};
-document.addEventListener('visibilitychange', checkDraftExpiry);
-window.addEventListener('pageshow', checkDraftExpiry);
-setInterval(checkDraftExpiry, 60 * 60 * 1000);
+
+window.addEventListener('pagehide', stopCamera);
 try { renderHistory(); } catch (failure) { error(failure.message); }
-if (!client) {
-  $('status').textContent = hostError || '请从支持 Agent 的灵犀应用库中打开，并在应用详情中选择模型与授权。普通浏览器无法调用宿主 Agent。';
+if (!agent) {
+  $('status').textContent = hostError || '请从支持 AG-UI 1.0 的灵犀应用库中打开，并在应用详情中选择模型与授权。普通浏览器无法调用宿主 Agent。';
 } else {
-  setBusy(true);
-  client.resume().then((runId) => {
-    if (client.drafts.expired) $('status').textContent = '保存的照片重试草稿已超过 24 小时并已删除；没有请求被自动重新提交。';
-    if (!runId) {
-      setBusy(false);
-      if (client.pending) {
-        const draftPhoto = client.pending.attachments?.[0];
-        if (draftPhoto instanceof File) showPhoto(draftPhoto, false);
-        $('status').textContent = '保留了一条未确认请求。点击“恢复同一请求”后才会再次提交。';
-      }
-    }
-  }).catch((failure) => { error(`恢复任务失败：${failure.message}`); setBusy(false); });
+  setBusy(false);
 }
