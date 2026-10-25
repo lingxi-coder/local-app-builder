@@ -17,7 +17,7 @@ function clearOldAgentCaches() {
       const storage = getStorage();
       for (let index = storage.length - 1; index >= 0; index--) {
         const key = storage.key(index);
-        if (key && /^revision-\d+:meal-notes\.agent\.(pending|run)$/.test(key)) storage.removeItem(key);
+        if (key && /^(?:revision-\d+:)?meal-notes\.agent\.(pending|run)$/.test(key)) storage.removeItem(key);
       }
     } catch {}
   }
