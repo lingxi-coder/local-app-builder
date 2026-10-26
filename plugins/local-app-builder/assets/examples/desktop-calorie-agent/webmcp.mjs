@@ -284,15 +284,24 @@ export function registerMealWebMcp({
   getDraftSummary,
   updateDraftPortion,
   listSavedRecords,
+  onStatus,
 } = {}) {
+  const report = (status) => {
+    try { onStatus?.(status); }
+    catch { /* Availability reporting must not interrupt the ordinary App. */ }
+  };
   let modelContext;
   try { modelContext = documentRef?.modelContext; }
   catch { modelContext = null; }
-  if (!isModelContext(modelContext)
-    || !windowRef
+  if (!isModelContext(modelContext)) {
+    report({state: 'unavailable', reason: 'api_unavailable'});
+    return { supported: false, ready: Promise.resolve(false), dispose() {} };
+  }
+  if (!windowRef
     || typeof windowRef.addEventListener !== 'function'
     || typeof windowRef.removeEventListener !== 'function'
     || typeof AbortController !== 'function') {
+    report({state: 'unavailable', reason: 'lifecycle_unavailable'});
     return { supported: false, ready: Promise.resolve(false), dispose() {} };
   }
 
@@ -305,16 +314,21 @@ export function registerMealWebMcp({
     if (disposed || controller) return ready;
     const nextController = new AbortController();
     controller = nextController;
+    report({state: 'pending'});
     ready = (async () => {
       for (const tool of tools) {
         if (nextController.signal.aborted) return false;
         await modelContext.registerTool(tool, { signal: nextController.signal });
       }
-      return !nextController.signal.aborted;
+      const registered = !nextController.signal.aborted;
+      if (registered && !disposed) report({state: 'registered'});
+      return registered;
     })().catch(() => {
       if (controller === nextController) {
+        const failed = !nextController.signal.aborted;
         nextController.abort();
         controller = null;
+        if (failed && !disposed) report({state: 'unavailable', reason: 'registration_failed'});
       }
       return false;
     });

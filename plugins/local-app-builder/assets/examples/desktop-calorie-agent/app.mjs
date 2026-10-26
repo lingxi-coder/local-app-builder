@@ -22,10 +22,15 @@ function clearOldAgentCaches() {
       }
     } catch {}
   }
-  if (globalThis.indexedDB) {
-    const request = indexedDB.deleteDatabase('meal-notes-agent-drafts');
+  try {
+    const indexedDb = globalThis.indexedDB;
+    if (!indexedDb) return;
+    const request = indexedDb.deleteDatabase('meal-notes-agent-drafts');
     request.onerror = () => console.warn('Could not remove the retired meal Agent draft database.');
     request.onblocked = () => console.warn('The retired meal Agent draft database is still open in another tab.');
+  } catch {
+    // Removing the retired cache is optional; storage denial must not block the App UI.
+    console.warn('Could not access the retired meal Agent draft database.');
   }
 }
 clearOldAgentCaches();
@@ -174,6 +179,11 @@ function edits() {
 }
 
 function updateTotal() {
+  if (!result || !completedRunId || busy) {
+    $('save').disabled = true;
+    if (!result) $('total').textContent = '';
+    return;
+  }
   try {
     const values = edits();
     const range = calorieRange(result.items.map((item, index) => ({ ...item, grams: values[index].grams })));
@@ -316,6 +326,7 @@ $('analyze').addEventListener('click', async () => {
   } finally {
     runClient = null;
     setBusy(false);
+    if (result && completedRunId) updateTotal();
   }
 });
 
@@ -355,16 +366,41 @@ function renderHistory() {
 }
 
 $('save').addEventListener('click', () => {
+  let record;
   try {
     if (!completedRunId) throw new Error('没有可保存的已完成估算。');
-    const record = mealRecord(result, edits(), completedRunId);
+    record = mealRecord(result, edits(), completedRunId);
     const records = readHistory();
     localStorage.setItem(historyKey, JSON.stringify([record, ...records.filter((item) => item.id !== record.id)]));
-    renderHistory();
-    $('status').textContent = '已保存。照片未保存在餐食记录中。';
-    error('');
-  } catch (failure) { error(`未保存：${failure.message}`); }
+  } catch (failure) {
+    error(`未保存：${failure.message}`);
+    return;
+  }
+
+  // A committed record is read-only to WebMCP. Close and clear the in-memory
+  // editor only after localStorage confirms the write.
+  completedRunId = null;
+  result = null;
+  $('result').hidden = true;
+  $('food-items').replaceChildren();
+  $('assumptions').replaceChildren();
+  $('questions').replaceChildren();
+  $('total').textContent = '';
+  $('save').disabled = true;
+  $('status').textContent = '已保存。照片未保存在餐食记录中。';
+  error('');
+  try { renderHistory(); }
+  catch (failure) { error(`已保存，但无法刷新餐食列表：${failure.message}`); }
 });
+
+function reportWebMcpStatus({state, reason} = {}) {
+  const status = $('webmcp-status');
+  if (state === 'pending') status.textContent = '正在注册 Agent 页面工具…';
+  else if (state === 'registered') status.textContent = 'Agent 页面工具已注册；保存记录仍需你手动确认。';
+  else if (reason === 'registration_failed') status.textContent = 'Agent 页面工具注册失败；你仍可手动使用餐食记录。';
+  else status.textContent = '当前浏览器未提供 Agent 页面工具；你仍可手动使用餐食记录。';
+  status.hidden = false;
+}
 
 window.addEventListener('pagehide', stopCamera);
 try { renderHistory(); } catch (failure) { error(failure.message); }
@@ -383,4 +419,5 @@ registerMealWebMcp({
   getDraftSummary: currentMealDraftSummary,
   updateDraftPortion: updateUnsavedDraftPortion,
   listSavedRecords: listSavedMealSummaries,
+  onStatus: reportWebMcpStatus,
 });

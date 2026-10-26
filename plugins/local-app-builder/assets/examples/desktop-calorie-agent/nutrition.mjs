@@ -36,13 +36,14 @@ export function checkedResult(value, { allowNutritionSources = false } = {}) {
   }
   if (value.items.length > 20) throw new Error('识别结果包含过多条目。');
   const items = value.items.map((item) => {
-    if (!item || typeof item.name !== 'string' || !item.name.trim()
+    if (!item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 120
       || !Number.isFinite(item.grams) || item.grams < 1 || item.grams > 10000
       || !Number.isFinite(item.kcalPer100gMin) || item.kcalPer100gMin < 0
       || !Number.isFinite(item.kcalPer100gMax) || item.kcalPer100gMax > 1000
       || item.kcalPer100gMin > item.kcalPer100gMax
       || !['model_estimate', 'nutrition_source'].includes(item.basis)
-      || !Array.isArray(item.sources) || item.sources.some((source) => typeof source !== 'string')) {
+      || !Array.isArray(item.sources) || item.sources.length > 8
+      || item.sources.some((source) => typeof source !== 'string' || source.length > 500)) {
       throw new Error('热量范围或份量无效，请重试。');
     }
     if (item.basis === 'nutrition_source' && (!allowNutritionSources || item.sources.length === 0)) {
@@ -53,7 +54,8 @@ export function checkedResult(value, { allowNutritionSources = false } = {}) {
     }
     return { ...item, name: item.name.trim(), sources: [...item.sources] };
   });
-  if ([...value.assumptions, ...value.questions].some((text) => typeof text !== 'string')) {
+  if (value.assumptions.length > 12 || value.questions.length > 8
+    || [...value.assumptions, ...value.questions].some((text) => typeof text !== 'string' || text.length > 500)) {
     throw new Error('识别说明无效，请重试。');
   }
   return { items, assumptions: [...value.assumptions], questions: [...value.questions] };

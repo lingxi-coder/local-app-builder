@@ -63,6 +63,120 @@ class FakeWindow {
   listenerCount(type) { return this.listeners.get(type)?.size ?? 0; }
 }
 
+async function bootCalorieApp({agent, modelContext, storage, indexedDB, indexedDBGetter, warnings = []} = {}) {
+  const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
+  let source = await readFile(new URL('app.mjs', base), 'utf8');
+  source = source
+    .replace(/^import .* from '\.\/nutrition\.mjs';\s*$/m, '')
+    .replace(/^import .* from '\.\/webmcp\.mjs';\s*$/m, '');
+
+  function findField(node, field) {
+    if (node?.dataset?.field === field) return node;
+    for (const child of node?.children ?? []) {
+      const found = findField(child, field);
+      if (found) return found;
+    }
+    return null;
+  }
+  class Element {
+    constructor(id = '') {
+      this.id = id;
+      this.value = '';
+      this.hidden = false;
+      this.disabled = false;
+      this.textContent = '';
+      this.listeners = new Map();
+      this.children = [];
+      this.dataset = {};
+    }
+    addEventListener(type, listener) {
+      const handlers = this.listeners.get(type) ?? new Set();
+      handlers.add(listener);
+      this.listeners.set(type, handlers);
+    }
+    dispatchEvent(event) {
+      let result;
+      for (const listener of this.listeners.get(event.type) ?? []) result = listener(event);
+      return result ?? true;
+    }
+    click() { return this.dispatchEvent({type: 'click', target: this}); }
+    replaceChildren(...children) { this.children = children; this.textContent = ''; }
+    append(...children) { this.children.push(...children); }
+    querySelectorAll(selector) {
+      if (selector === '.food') return this.children.filter((child) => child.className === 'food');
+      return [];
+    }
+    querySelector(selector) {
+      const match = selector.match(/^\[data-field="([^"]+)"\]$/);
+      return match ? findField(this, match[1]) : null;
+    }
+  }
+  const elements = new Map();
+  const document = {
+    modelContext,
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, new Element(id));
+      return elements.get(id);
+    },
+    createElement(tag) { return new Element(tag); },
+  };
+  const localStorage = storage ?? {
+    value: '[]',
+    length: 0,
+    key: () => null,
+    getItem() { return this.value; },
+    setItem(_key, value) { this.value = value; },
+    removeItem() {},
+  };
+  const sessionStorage = {length: 0, key: () => null, getItem: () => null, setItem() {}, removeItem() {}};
+  const localApp = {
+    info: async () => ({hostPlatform: 'macos'}),
+    ...(agent ? {agent} : {}),
+  };
+  const window = new FakeWindow();
+  window.localApp = localApp;
+  const context = {localApp, localStorage, sessionStorage};
+  if (indexedDBGetter) Object.defineProperty(context, 'indexedDB', {get: indexedDBGetter});
+  else if (indexedDB !== undefined) context.indexedDB = indexedDB;
+  const nutrition = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs');
+  const webmcp = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/webmcp.mjs');
+  const crypto = {randomUUID: (() => { let id = 0; return () => `meal-run-${++id}`; })()};
+  const console = {warn: (...args) => warnings.push(args)};
+  class File { constructor() { this.name = 'meal-photo.jpg'; this.type = 'image/jpeg'; this.size = 1; } }
+  const url = {createObjectURL: () => 'blob:meal-photo', revokeObjectURL() {}};
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const runApp = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'sessionStorage', 'nutrition', 'webmcp', 'crypto', 'console', 'File', 'Event', 'URL',
+    `const {nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord} = nutrition;\n`
+      + `const {applyUnsavedMealPortion, registerMealWebMcp, summarizeMealDraft, summarizeSavedMealRecords} = webmcp;\n`
+      + `${source}\nreturn {document, window, click: (id) => document.getElementById(id).click(), prepareImage: () => showPhoto(new File()), state: () => ({result, completedRunId, busy})};`);
+  const app = await runApp(context, document, window, localStorage, sessionStorage, nutrition, webmcp, crypto, console, File, Event, url);
+  return {...app, storage: localStorage, modelContext, warnings};
+}
+
+async function waitFor(predicate, message) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+  assert.fail(message);
+}
+
+function successfulMealAgent() {
+  return {
+    async file() { return {type: 'image', source: {type: 'data', value: 'private-photo-bytes', mimeType: 'image/jpeg'}}; },
+    createClient() {
+      return {
+        addMessage() {},
+        abortRun() {},
+        async runAgent(_input, subscriber) {
+          subscriber.onRunFinishedEvent({outcome: 'success'});
+          return {result: result(), newMessages: []};
+        },
+      };
+    },
+  };
+}
+
 test('edits scale estimates without silently replacing model assumptions or provenance', () => {
   const checked = checkedResult(result());
   assert.deepEqual(calorieRange(checked.items), {min: 180, max: 225});
@@ -78,6 +192,13 @@ test('edits scale estimates without silently replacing model assumptions or prov
 
 test('inverted ranges, invalid edited portions, and unearned database provenance are rejected', () => {
   assert.throws(() => checkedResult({...result(), items: [{...food, kcalPer100gMin: 200}]}));
+  assert.throws(() => checkedResult({...result(), items: [{...food, name: 'x'.repeat(121)}]}));
+  assert.throws(() => checkedResult({...result(), items: [{...food, sources: Array(9).fill('source')}]}));
+  assert.throws(() => checkedResult({...result(), items: [{...food, sources: ['x'.repeat(501)]}]}));
+  assert.throws(() => checkedResult({...result(), assumptions: Array(13).fill('assumption')}));
+  assert.throws(() => checkedResult({...result(), assumptions: ['x'.repeat(501)]}));
+  assert.throws(() => checkedResult({...result(), questions: Array(9).fill('question')}));
+  assert.throws(() => checkedResult({...result(), questions: ['x'.repeat(501)]}));
   for (const grams of ['', 0, -1, Infinity, 'unknown', 10001]) {
     assert.throws(() => mealRecord(result(), [{name: 'Rice', grams}], 'run-1'));
   }
@@ -273,52 +394,125 @@ test('native registration does not require page-side discovery, and failed batch
   denied.dispose();
 });
 
-test('the calorie page keeps its ordinary UI boot path without document.modelContext', async () => {
-  const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
-  let source = await readFile(new URL('app.mjs', base), 'utf8');
-  source = source
-    .replace(/^import .* from '\.\/nutrition\.mjs';\s*$/m, '')
-    .replace(/^import .* from '\.\/webmcp\.mjs';\s*$/m, '');
-  class Element {
-    constructor(id = '') {
-      this.id = id;
-      this.value = '';
-      this.hidden = false;
-      this.disabled = false;
-      this.textContent = '';
-      this.listeners = new Map();
-      this.children = [];
-    }
-    addEventListener(type, listener) { this.listeners.set(type, listener); }
-    replaceChildren(...children) { this.children = children; }
-    append(...children) { this.children.push(...children); }
-  }
-  const elements = new Map();
-  const document = {
-    getElementById(id) {
-      if (!elements.has(id)) elements.set(id, new Element(id));
-      return elements.get(id);
-    },
-  };
-  const localStorage = {length: 0, getItem: () => '[]', setItem() {}, removeItem() {}, key: () => null};
-  const sessionStorage = {length: 0, getItem: () => null, setItem() {}, removeItem() {}, key: () => null};
-  const window = {localApp: {}, listeners: new Map(), addEventListener(type, listener) { this.listeners.set(type, listener); }};
-  const context = {localApp: {}, localStorage, sessionStorage};
-  const nutrition = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs');
-  const webmcp = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/webmcp.mjs');
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const runApp = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'sessionStorage', 'nutrition', 'webmcp',
-    `const {nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord} = nutrition;\n`
-      + `const {applyUnsavedMealPortion, registerMealWebMcp, summarizeMealDraft, summarizeSavedMealRecords} = webmcp;\n`
-      + `${source}\nreturn {document, window};`);
+test('saving finalizes the draft and its WebMCP edit tool cannot alter saved history', async () => {
+  const modelContext = new FakeModelContext();
+  const app = await bootCalorieApp({agent: successfulMealAgent(), modelContext});
+  await waitFor(() => modelContext.registerCalls.length === 3, 'app should register its three WebMCP tools');
+  app.prepareImage();
+  await app.click('analyze');
 
-  const app = await runApp(context, document, window, localStorage, sessionStorage, nutrition, webmcp);
-  for (const id of ['photo-choose', 'camera-open', 'analyze', 'cancel', 'save']) {
-    assert.equal(typeof app.document.getElementById(id)?.listeners.get('click'), 'function', `${id} UI remains wired`);
+  assert.ok(app.state().completedRunId);
+  assert.equal(app.document.getElementById('save').disabled, false);
+  const oldGramsInput = app.document.getElementById('food-items').querySelectorAll('.food')[0].querySelector('[data-field="grams"]');
+  app.click('save');
+  const savedStorage = app.storage.value;
+  const savedRecords = JSON.parse(savedStorage);
+  assert.equal(savedRecords.length, 1);
+  assert.equal(app.state().completedRunId, null);
+  assert.equal(app.state().result, null);
+  assert.equal(app.document.getElementById('result').hidden, true);
+  assert.equal(app.document.getElementById('save').disabled, true);
+
+  // A late event from a detached input cannot re-enable Save after finalization.
+  oldGramsInput.dispatchEvent(new Event('input'));
+  assert.equal(app.document.getElementById('save').disabled, true);
+
+  const tools = Object.fromEntries((await modelContext.getTools()).map((tool) => [tool.name, tool]));
+  const summary = JSON.parse(await modelContext.executeTool(tools.meal_get_draft_summary, {}));
+  assert.equal(summary.available, false);
+  await assert.rejects(modelContext.executeTool(tools.meal_update_unsaved_portion, {itemIndex: 0, grams: 200}));
+  assert.equal(app.storage.value, savedStorage, 'WebMCP cannot rewrite the saved run');
+  assert.deepEqual(JSON.parse(app.storage.value), savedRecords);
+});
+
+test('a failed storage write keeps the completed draft available for correction and retry', async () => {
+  const modelContext = new FakeModelContext();
+  const storage = {
+    value: '[]', length: 0, key: () => null, getItem() { return this.value; }, removeItem() {},
+    setItem() { throw new Error('storage quota denied'); },
+  };
+  const app = await bootCalorieApp({agent: successfulMealAgent(), modelContext, storage});
+  await waitFor(() => modelContext.registerCalls.length === 3, 'app should register its three WebMCP tools');
+  app.prepareImage();
+  await app.click('analyze');
+  app.click('save');
+
+  assert.ok(app.state().completedRunId);
+  assert.ok(app.state().result);
+  assert.equal(app.document.getElementById('result').hidden, false);
+  assert.equal(app.document.getElementById('save').disabled, false);
+  assert.match(app.document.getElementById('error').textContent, /storage quota denied/);
+  assert.equal(storage.value, '[]');
+
+  const tools = Object.fromEntries((await modelContext.getTools()).map((tool) => [tool.name, tool]));
+  const update = JSON.parse(await modelContext.executeTool(tools.meal_update_unsaved_portion, {itemIndex: 0, grams: 220}));
+  assert.equal(update.updated, true);
+  assert.deepEqual(update.calorieRange, {min: 264, max: 330});
+  assert.equal(app.document.getElementById('save').disabled, false);
+  assert.equal(storage.value, '[]', 'editing stays in the visible draft until a later successful Save');
+});
+
+test('WebMCP missing or denied is reported without disabling the manual meal UI', async () => {
+  const exampleRoot = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
+  const html = await readFile(new URL('index.html', exampleRoot), 'utf8');
+  assert.match(html, /id="webmcp-status"[^>]*role="status"[^>]*hidden/);
+
+  const missing = await bootCalorieApp({agent: successfulMealAgent()});
+  const missingStatus = missing.document.getElementById('webmcp-status');
+  assert.equal(missingStatus.hidden, false);
+  assert.match(missingStatus.textContent, /未提供/);
+  assert.ok(missing.document.getElementById('analyze').listeners.get('click')?.size);
+  assert.ok(missing.document.getElementById('photo-choose').listeners.get('click')?.size);
+
+  const denied = await bootCalorieApp({
+    agent: successfulMealAgent(),
+    modelContext: {async registerTool() { throw new Error('browser denied registration'); }},
+  });
+  await waitFor(
+    () => denied.document.getElementById('webmcp-status').textContent.includes('注册失败'),
+    'registration failure should reach the visible status row',
+  );
+  assert.ok(denied.document.getElementById('analyze').listeners.get('click')?.size);
+  assert.ok(denied.document.getElementById('save').listeners.get('click')?.size);
+
+  const registeredContext = new FakeModelContext();
+  const registered = await bootCalorieApp({agent: successfulMealAgent(), modelContext: registeredContext});
+  await waitFor(() => registeredContext.registerCalls.length === 3, 'app should register all tools');
+  await waitFor(
+    () => registered.document.getElementById('webmcp-status').textContent.includes('已注册'),
+    'successful registration should be visible without claiming external Agent acceptance',
+  );
+});
+
+test('legacy IndexedDB cleanup failure cannot abort ordinary App startup', async () => {
+  for (const config of [
+    {indexedDBGetter: () => { throw new Error('IndexedDB getter denied'); }},
+    {indexedDB: {deleteDatabase() { throw new Error('IndexedDB delete denied'); }}},
+  ]) {
+    const warnings = [];
+    const app = await bootCalorieApp({...config, warnings});
+    assert.ok(warnings.length > 0, 'cleanup failure is recorded for diagnostics');
+    for (const id of ['photo-choose', 'camera-open', 'analyze', 'save']) {
+    assert.ok(app.document.getElementById(id).listeners.get('click')?.size);
+    }
   }
-  assert.match(app.document.getElementById('status').textContent, /普通浏览器无法调用宿主 Agent/);
-  assert.equal(document.modelContext, undefined);
-  assert.deepEqual([...window.listeners.keys()], ['pagehide'], 'only ordinary camera cleanup was installed');
+});
+
+test('oversized locally edited history is rejected by the app tool without a storage write', async () => {
+  const modelContext = new FakeModelContext();
+  const malformed = mealRecord(checkedResult(result()), [{name: 'Rice', grams: 150}], 'oversized-record');
+  malformed.items[0].name = 'Rice'.repeat(40);
+  const storage = {
+    value: JSON.stringify([malformed]), length: 0, key: () => null,
+    getItem() { return this.value; }, setItem() { throw new Error('must not write while listing'); }, removeItem() {},
+  };
+  const app = await bootCalorieApp({agent: successfulMealAgent(), modelContext, storage});
+  await waitFor(() => modelContext.registerCalls.length === 3, 'app should register its three WebMCP tools');
+  const before = storage.value;
+  const tools = Object.fromEntries((await modelContext.getTools()).map((tool) => [tool.name, tool]));
+  await assert.rejects(modelContext.executeTool(tools.meal_list_saved_records, {}));
+  assert.equal(storage.value, before);
+  assert.equal(app.state().result, null);
 });
 
 test('persistent chat restores the same thread read-only and starts runs only for new user turns', async () => {
