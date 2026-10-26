@@ -6,6 +6,7 @@ let chat = null;
 let client = null;
 let selectedFiles = [];
 let pendingDraft = null;
+let pendingRequestMissingRunId = null;
 let busy = false;
 let drafts = null;
 
@@ -14,6 +15,18 @@ function showRecoveryWarning() {
   $('recovery-warning').hidden = false;
 }
 window.addEventListener('localApp:recovery-unavailable', showRecoveryWarning);
+
+function showPendingRequestMissing() {
+  if (typeof pendingRequestMissingRunId !== 'string') return;
+  if (pendingDraft && pendingDraft.runId !== pendingRequestMissingRunId) return;
+  setStatus(`This browser context cannot access the saved input for run ${pendingRequestMissingRunId}. Return to the original tab or reopen this App in a browser context that shares its storage. Nothing was resent. Review the input before explicitly starting a new request.`);
+}
+window.addEventListener('localApp:agent-handoff-error', (event) => {
+  const detail = event?.detail;
+  if (detail?.code !== 'pending_request_missing' || typeof detail.runId !== 'string' || !detail.runId) return;
+  pendingRequestMissingRunId = detail.runId;
+  showPendingRequestMissing();
+});
 
 async function loadHostSdk() {
   if (!globalThis.localApp) {
@@ -199,6 +212,23 @@ async function refreshHistory() {
   renderMessages(messages);
 }
 
+async function getSavedTask(draft) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await app.agent.tasks.get(draft.runId);
+    } catch (failure) {
+      if (failure?.code !== 'task_not_found') throw failure;
+      if (attempt < 2) {
+        setStatus('The saved run is not visible yet. Checking the same run again without sending a model request…');
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+  }
+  const failure = new Error(`Saved run ${draft.runId} is not visible yet. The original input and run ID remain saved; retry this read-only check. No model failure was confirmed and no new request was sent.`);
+  failure.code = 'task_not_found';
+  throw failure;
+}
+
 async function attachFiles() {
   if (!app) { $('file-input').click(); return; }
   try {
@@ -261,7 +291,7 @@ async function openChat(chatId) {
 }
 
 async function recoverSavedRun(draft, history) {
-  const task = await app.agent.tasks.get(draft.runId);
+  const task = await getSavedTask(draft);
   if (!task || task.runId !== draft.runId || task.threadId !== chat.id) {
     throw new Error('The host could not confirm the saved run belongs to this Chat. The draft remains saved.');
   }
@@ -411,6 +441,7 @@ async function boot() {
     $('file-names').textContent = pendingDraft.files?.map((file) => file.name).join(', ') || 'No files selected';
     setStatus('A saved turn is ready. Choose Retry to reuse its run ID and original files.');
   }
+  showPendingRequestMissing();
   updateControls();
 }
 

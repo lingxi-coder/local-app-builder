@@ -165,6 +165,12 @@ await client.connectAgent({runId}, {onEvent({event}) { renderEvent(event); }}); 
 
 Never start a new run merely to recover a lost page Promise, and do not claim cancellation until a cancelled terminal outcome arrives.
 
+### Recovery and terminal outcomes
+
+A `task_not_found` from an immediate read-only `tasks.get` can be a transient lookup miss, not a model outcome. Keep the exact draft and `runId`; retry only read-only `tasks.get`/`connectAgent` or event reads with that same identity. Never call `tasks.start`, `agent.run` or Chat `send` to recover an existing request. When a task is queued or running, keep `connectAgent` or `tasks.subscribe` observing standard events until `RUN_FINISHED` or `RUN_ERROR`; a task status or refreshed Chat history is not a terminal outcome. On successful completion, validate `RunAgentResult.result` against the declared `outputSchema` and app-specific rules before side effects.
+
+Mobile handoff may dispatch `localApp:agent-handoff-error`. For `detail.code === 'pending_request_missing'`, correlate `detail.runId` with the saved request and explain that the returned browser storage context cannot access its original input. Ask the user to return to the original tab or reopen the App in a context sharing that storage. Do not automatically resend, replace the `runId`, or call this a model failure; a new request requires explicit user review and action. Do not infer Private Browsing or select a browser brand.
+
 ## Mobile browser and host boundary
 
 Mobile Local Apps run in the OS-selected external browser, never in an embedded Android WebView or iOS WKWebView. Do not hardcode Safari, Chrome or another browser brand. Detect file, camera, IndexedDB and recovery support from web APIs. Load the host SDK before application calls with `if (!globalThis.localApp) await import('/__local_app_sdk.js')` in the external browser; Desktop uses its preload SDK. The SDK saves the complete input for the iOS foreground wake-and-return flow and correlates it by `runId`; it keeps pending inputs for at most 24 hours and accepted run-ID receipts for 7 days, with 32-record/100 MiB caps. It submits only after the matching native readiness return. Ordinary refresh never replays a run. The app-origin recovery worker caches only its fixed recovery page, never App pages, prompts, files, requests or results. Use `localApp.info().recovery.status` and listen for `localApp:recovery-unavailable`. Use `localApp.host.open()` only from an explicit user action to return to trusted LingXi approvals or settings.

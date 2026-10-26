@@ -25,7 +25,7 @@ Proceed when the request is clear; ask only for missing decisions that affect th
 
 ## When the App calls an Agent
 
-Read [the host Agent contract](references/host-agent.md) for AG-UI 1.0 messages, generic File parts, structured output, tools/Skills, independent runs, persistent Chat and recovery. Use the host's official SDK and `window.localApp.agent`; provider credentials, model selection, approvals and questions stay with LingXi. WebMCP exposes **App operations to an Agent**; AG-UI lets **the App request Agent work**. They have different permission boundaries.
+Read [the host Agent contract](references/host-agent.md) for AG-UI 1.0 messages, generic File parts, structured output, tools/Skills, independent runs, persistent Chat and recovery. Generate Agent calls only with the host's official SDK and standard AG-UI `RunAgentInput`, `Message`, `BaseEvent` and Schema contract; do not invent another request or event format. Provider credentials, model selection, approvals and questions stay with LingXi. WebMCP exposes **App operations to an Agent**; AG-UI lets **the App request Agent work**. They have different permission boundaries.
 
 Start with `${LINGXI_SKILL_DIR}/../../assets/examples/desktop-calorie-agent` for photo recognition, validated estimates and explicit save, including WebMCP access to App state. For persistent file-backed conversations use `${LINGXI_SKILL_DIR}/../../assets/examples/attachment-chat-skill`. Keep the user's file confirmation, cancellation and business validation. A WebMCP call must not silently upload a selected file, start a paid model request or approve host tools.
 

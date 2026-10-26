@@ -580,6 +580,8 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
   };
   const historyMessage = {id: 'message-1', role: 'user', content: [{type: 'text', text: 'Keep this exact request'}]};
   const calls = {createdClients: [], connects: [], starts: 0, taskLookups: [], chatLists: []};
+  const window = new FakeWindow();
+  let releaseConnect;
   const chat = {
     id: 'chat-1',
     async history() { return {messages: [historyMessage]}; },
@@ -599,6 +601,11 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
       tasks: {
         async get(runId) {
           calls.taskLookups.push(runId);
+          if (calls.taskLookups.length === 1) {
+            const failure = new Error('The task is not visible yet.');
+            failure.code = 'task_not_found';
+            throw failure;
+          }
           return {runId, threadId: 'chat-1', state: 'failed'};
         },
       },
@@ -609,6 +616,7 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
           setMessages(messages) { this.messages = [...messages]; },
           async connectAgent(parameters, subscriber) {
             calls.connects.push({options, parameters});
+            await new Promise((resolve) => { releaseConnect = resolve; });
             await subscriber.onRunErrorEvent({event: {
               type: 'RUN_ERROR',
               message: 'Provider disconnected',
@@ -628,23 +636,38 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const runFixture = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'File', 'confirm', 'setInterval', 'Option',
     `${source}\nawait boot();\nreturn {sendTurn, pending: () => pendingDraft, setPending: (draft) => { pendingDraft = draft; }};`);
-  const fixture = await runFixture(context, document, {addEventListener() {}}, localStorage, class File {}, () => false, () => 0, Option);
+  const fixture = await runFixture(context, document, window, localStorage, class File {}, () => false, () => 0, Option);
   const draft = {chatId: 'chat-1', runId: 'run-1', messageId: 'message-1', prompt: 'Keep this exact request', files: [], skills: []};
   fixture.setPending(draft);
 
-  await fixture.sendTurn();
+  const recoveryPromise = fixture.sendTurn();
+  for (let attempt = 0; attempt < 100 && typeof releaseConnect !== 'function'; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(typeof releaseConnect, 'function', 'read-only reconnect did not observe the saved run.');
+  assert.equal(calls.taskLookups.length, 2, 'task_not_found is retried as a read-only lookup');
+  assert.equal(calls.starts, 0, 'a transient lookup miss never starts another model request');
+  assert.equal(fixture.pending(), draft, 'the saved input remains while recovery waits for a terminal event');
+  releaseConnect();
+  await recoveryPromise;
 
   assert.deepEqual(calls.chatLists, [
     {limit: 50, includeArchived: false},
     {limit: 50, includeArchived: false, cursor: 'cursor-1'},
   ]);
-  assert.deepEqual(calls.taskLookups, ['run-1']);
+  assert.deepEqual(calls.taskLookups, ['run-1', 'run-1']);
   assert.deepEqual(calls.createdClients[1], {threadId: 'chat-1'}, 'recovery client has no initial messages or remembered run ID');
   assert.deepEqual(calls.connects, [{options: {threadId: 'chat-1'}, parameters: {runId: 'run-1'}}]);
   assert.equal(calls.starts, 0, 'RUN_ERROR recovery must not start a model request');
   assert.equal(fixture.pending(), draft, 'the exact retry input and run ID remain saved after RUN_ERROR');
   assert.match(elements.get('status').textContent, /Provider disconnected/);
   assert.match(elements.get('status').textContent, /remain saved/);
+
+  window.dispatch('localApp:agent-handoff-error', {detail: {runId: 'run-1', code: 'pending_request_missing'}});
+  assert.match(elements.get('status').textContent, /run-1/);
+  assert.match(elements.get('status').textContent, /original tab/);
+  assert.equal(calls.starts, 0, 'a missing browser request is never automatically resubmitted');
+  assert.equal(fixture.pending(), draft, 'the original draft and run ID remain available');
 });
 
 test('a persistent Chat run sends only its new user Message, not historical File bytes', async () => {
@@ -748,11 +771,13 @@ test('a persistent Chat run sends only its new user Message, not historical File
 
 test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent contract', async () => {
   const root = new URL('../../', import.meta.url);
-  const [plugin, readme, skill, reference] = await Promise.all([
+  const [plugin, readme, skill, reference, attachmentApp, attachmentReadme] = await Promise.all([
     readFile(new URL('plugins/local-app-builder/.lingxi-plugin/plugin.json', root), 'utf8'),
     readFile(new URL('README.md', root), 'utf8'),
     readFile(new URL('plugins/local-app-builder/skills/create-local-app/SKILL.md', root), 'utf8'),
     readFile(new URL('plugins/local-app-builder/skills/create-local-app/references/host-agent.md', root), 'utf8'),
+    readFile(new URL('plugins/local-app-builder/assets/examples/attachment-chat-skill/app.mjs', root), 'utf8'),
+    readFile(new URL('plugins/local-app-builder/assets/examples/attachment-chat-skill/README.md', root), 'utf8'),
   ]);
   assert.equal(JSON.parse(plugin).version, '6.1.0');
   for (const document of [readme, reference]) {
@@ -761,6 +786,7 @@ test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent co
   }
   assert.match(skill, /AG-UI 1\.0/);
   assert.match(skill, /references\/host-agent\.md/);
+  assert.match(skill, /official SDK and standard AG-UI `RunAgentInput`/);
   assert.match(reference, /Message\[\]/);
   assert.match(reference, /ContentPart/);
   assert.match(reference, /BaseEvent/);
@@ -771,5 +797,13 @@ test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent co
   assert.match(reference, /onRunFinishedEvent\(\{outcome: terminalOutcome\}\)/);
   assert.match(reference, /connectAgent\(\{runId\},/);
   assert.match(reference, /read-only/);
+  assert.match(reference, /task_not_found[\s\S]*?lookup miss/i);
+  assert.match(reference, /pending_request_missing/);
+  assert.match(reference, /outputSchema[\s\S]*?side effects/);
   assert.match(reference, /finite OS execution lease/);
+  assert.match(attachmentApp, /localApp:agent-handoff-error/);
+  assert.match(attachmentApp, /pending_request_missing/);
+  assert.match(attachmentApp, /original tab/);
+  assert.match(attachmentReadme, /task_not_found/);
+  assert.match(attachmentReadme, /pending_request_missing/);
 });
