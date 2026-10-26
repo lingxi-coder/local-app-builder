@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: "22"
       - run: ./scripts/check-all.sh
-      - run: node --test scripts/tests/test-local-app-r4-libs.mjs
+      - run: node --test scripts/tests/*.mjs
 
   templates:
     strategy:

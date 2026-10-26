@@ -2,9 +2,66 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { checkedResult, calorieRange, mealRecord, recognitionPrompt } from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs';
+import {
+  applyUnsavedMealPortion,
+  registerMealWebMcp,
+  summarizeMealDraft,
+  summarizeSavedMealRecords,
+} from '../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/webmcp.mjs';
 
 const food = { name: 'Rice', grams: 150, kcalPer100gMin: 120, kcalPer100gMax: 150, basis: 'model_estimate', sources: [] };
 const result = () => ({ items: [{...food}], assumptions: ['Cooking oil is unknown'], questions: ['How much rice?'] });
+
+class FakeModelContext {
+  constructor() {
+    this.origin = 'https://meal.example';
+    this.window = {};
+    this.registerCalls = [];
+    this.registered = new Map();
+  }
+  async registerTool(tool, {signal} = {}) {
+    assert.ok(signal instanceof AbortSignal);
+    signal.throwIfAborted();
+    assert.equal(this.registered.has(tool.name), false, `duplicate registration: ${tool.name}`);
+    const entry = {tool, origin: this.origin, window: this.window, signal};
+    this.registerCalls.push(tool.name);
+    this.registered.set(tool.name, entry);
+    signal.addEventListener('abort', () => {
+      if (this.registered.get(tool.name) === entry) this.registered.delete(tool.name);
+    }, {once: true});
+  }
+  async getTools() {
+    return [...this.registered.values()].map(({tool, origin, window}) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      annotations: tool.annotations,
+      inputSchema: tool.inputSchema,
+      origin,
+      window,
+    }));
+  }
+  async executeTool(descriptor, input = {}, {signal} = {}) {
+    signal?.throwIfAborted();
+    const entry = this.registered.get(descriptor.name);
+    assert.ok(entry, `tool is registered: ${descriptor.name}`);
+    assert.equal(descriptor.origin, this.origin);
+    const value = entry.tool.execute(input, {signal});
+    return JSON.stringify(value);
+  }
+}
+
+class FakeWindow {
+  constructor() { this.listeners = new Map(); }
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+  removeEventListener(type, listener) { this.listeners.get(type)?.delete(listener); }
+  dispatch(type, event) { for (const listener of this.listeners.get(type) ?? []) listener(event); }
+  listenerCount(type) { return this.listeners.get(type)?.size ?? 0; }
+}
 
 test('edits scale estimates without silently replacing model assumptions or provenance', () => {
   const checked = checkedResult(result());
@@ -43,7 +100,7 @@ test('calorie example uses official AG-UI messages, ContentParts, results and li
   assert.deepEqual(manifest.agent.tools, []);
   assert.ok(manifest.targets.some((target) => target.platform === 'android'));
   assert.ok(manifest.targets.some((target) => target.platform === 'ios'));
-  assert.deepEqual(manifest.package.files, ['index.html', 'styles.css', 'app.mjs', 'nutrition.mjs']);
+  assert.deepEqual(manifest.package.files, ['index.html', 'styles.css', 'app.mjs', 'nutrition.mjs', 'webmcp.mjs']);
 
   const source = await readFile(new URL('app.mjs', base), 'utf8');
   for (const api of ['agent.createClient({threadId: crypto.randomUUID()})', 'await agent.file(image)',
@@ -53,6 +110,215 @@ test('calorie example uses official AG-UI messages, ContentParts, results and li
     assert.ok(source.includes(api), `calorie example should use ${api}`);
   }
   assert.doesNotMatch(source, /fetch\(|api[_-]?key|OPENAI_API_KEY|window\.lingxi|innerHTML/i);
+});
+
+test('WebMCP discovery and calls reuse meal logic, expose only bounded summaries, and leave Save to the user', async () => {
+  const modelContext = new FakeModelContext();
+  const windowRef = new FakeWindow();
+  const checked = checkedResult(result());
+  let draft = {result: checked, edits: [{name: 'Rice', grams: '150'}], canSave: true, busy: false};
+  const savedRecord = {...mealRecord(checked, [{name: 'Rice', grams: '150'}], 'saved-run', new Date('2026-10-23T12:00:00Z')), photoBytes: 'must-not-leave-storage'};
+  const savedRecords = [savedRecord];
+  const calls = {historyReads: 0};
+  const binding = registerMealWebMcp({
+    documentRef: {modelContext},
+    windowRef,
+    getDraftSummary: () => summarizeMealDraft(draft),
+    updateDraftPortion(input) {
+      const change = applyUnsavedMealPortion(draft, input);
+      draft = {...draft, edits: change.edits};
+      return {updated: true, draft: change.summary};
+    },
+    listSavedRecords(limit) {
+      calls.historyReads += 1;
+      return summarizeSavedMealRecords(savedRecords, limit);
+    },
+  });
+  assert.equal(binding.supported, true);
+  assert.equal(await binding.ready, true);
+
+  const tools = await modelContext.getTools();
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    'meal_get_draft_summary', 'meal_list_saved_records', 'meal_update_unsaved_portion',
+  ]);
+  const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+
+  const draftSummary = JSON.parse(await modelContext.executeTool(byName.meal_get_draft_summary, {}));
+  assert.equal(draftSummary.available, true);
+  assert.deepEqual(draftSummary.calorieRange, {min: 180, max: 225});
+  assert.equal(draftSummary.items[0].estimatedName, 'Rice');
+  assert.equal(draftSummary.canSave, true);
+  assert.equal('photoBytes' in draftSummary, false);
+
+  const history = JSON.parse(await modelContext.executeTool(byName.meal_list_saved_records, {limit: 1}));
+  assert.equal(calls.historyReads, 1);
+  assert.equal(history.count, 1);
+  assert.equal(history.records[0].id, 'saved-run');
+  assert.equal('photoBytes' in history.records[0], false);
+  assert.equal(JSON.stringify(history).includes('must-not-leave-storage'), false);
+
+  const update = JSON.parse(await modelContext.executeTool(byName.meal_update_unsaved_portion, {
+    itemIndex: 0, grams: 200, name: 'Cooked rice',
+  }));
+  assert.equal(update.updated, true);
+  assert.deepEqual(update.draft.calorieRange, {min: 240, max: 300});
+  assert.deepEqual(draft.edits, [{name: 'Cooked rice', grams: '200'}]);
+  assert.equal(draft.result.items[0].grams, 150, 'the model estimate remains unchanged');
+  assert.equal(draft.canSave, true, 'the draft remains eligible for the existing manual Save button');
+  assert.equal(savedRecords.length, 1, 'the WebMCP edit never writes the saved history');
+  assert.equal(windowRef.listenerCount('pagehide'), 1);
+  binding.dispose();
+});
+
+test('WebMCP rejects unknown or invalid inputs before draft or history state changes', async () => {
+  const modelContext = new FakeModelContext();
+  const draft = {result: checkedResult(result()), edits: [{name: 'Rice', grams: '150'}], canSave: true, busy: false};
+  const before = structuredClone(draft);
+  let historyReads = 0;
+  const binding = registerMealWebMcp({
+    documentRef: {modelContext},
+    windowRef: new FakeWindow(),
+    getDraftSummary: () => summarizeMealDraft(draft),
+    updateDraftPortion: (input) => {
+      const change = applyUnsavedMealPortion(draft, input);
+      draft.edits = change.edits;
+      return change;
+    },
+    listSavedRecords: () => { historyReads += 1; return {count: 0, records: []}; },
+  });
+  await binding.ready;
+  const tools = Object.fromEntries((await modelContext.getTools()).map((tool) => [tool.name, tool]));
+
+  for (const invalid of [
+    {itemIndex: 0, grams: 200, source: 'unexpected'},
+    {itemIndex: 0, grams: '200'},
+    {itemIndex: 0, grams: 10001},
+    {itemIndex: 20, grams: 200},
+    {itemIndex: 0, grams: 200, name: '   '},
+  ]) {
+    await assert.rejects(modelContext.executeTool(tools.meal_update_unsaved_portion, invalid));
+    assert.deepEqual(draft, before);
+  }
+  await assert.rejects(modelContext.executeTool(tools.meal_list_saved_records, {limit: 21}));
+  await assert.rejects(modelContext.executeTool(tools.meal_get_draft_summary, {includePhoto: true}));
+  assert.equal(historyReads, 0);
+  binding.dispose();
+});
+
+test('WebMCP is optional and its registrations survive BFCache but clear on real page exit', async () => {
+  let callbackCalls = 0;
+  const callbacks = {
+    getDraftSummary() { callbackCalls += 1; return {}; },
+    updateDraftPortion() { callbackCalls += 1; return {}; },
+    listSavedRecords() { callbackCalls += 1; return {}; },
+  };
+  const unsupportedWindow = new FakeWindow();
+  const unsupported = registerMealWebMcp({documentRef: {}, windowRef: unsupportedWindow, ...callbacks});
+  assert.equal(unsupported.supported, false);
+  assert.equal(await unsupported.ready, false);
+  assert.equal(unsupportedWindow.listenerCount('pagehide'), 0);
+  assert.equal(unsupportedWindow.listenerCount('pageshow'), 0);
+  assert.equal(callbackCalls, 0, 'missing document.modelContext does not call app handlers');
+
+  const modelContext = new FakeModelContext();
+  const page = new FakeWindow();
+  const binding = registerMealWebMcp({documentRef: {modelContext}, windowRef: page, ...callbacks});
+  await binding.ready;
+  assert.equal(callbackCalls, 0, 'registering business tools does not run or save an operation');
+  assert.equal((await modelContext.getTools()).length, 3);
+  assert.equal(modelContext.registerCalls.length, 3);
+
+  page.dispatch('pagehide', {persisted: true});
+  assert.equal((await modelContext.getTools()).length, 3, 'a BFCache entry retains its live document registration');
+  page.dispatch('pageshow', {persisted: true});
+  await binding.ready;
+  assert.equal((await modelContext.getTools()).length, 3);
+  assert.equal(modelContext.registerCalls.length, 3, 'restore does not duplicate the registered tools');
+
+  page.dispatch('pagehide', {persisted: false});
+  await Promise.resolve();
+  assert.equal((await modelContext.getTools()).length, 0, 'real navigation aborts all three registrations');
+  binding.dispose();
+
+  const reloaded = registerMealWebMcp({documentRef: {modelContext}, windowRef: new FakeWindow(), ...callbacks});
+  await reloaded.ready;
+  assert.equal((await modelContext.getTools()).length, 3, 'a new document can register one fresh copy');
+  assert.equal(modelContext.registerCalls.length, 6);
+  reloaded.dispose();
+});
+
+test('native registration does not require page-side discovery, and failed batches remove earlier tools', async () => {
+  const callbacks = {
+    getDraftSummary: () => ({available: false}),
+    updateDraftPortion: () => ({}),
+    listSavedRecords: () => ({records: []}),
+  };
+  const backing = new FakeModelContext();
+  const native = {registerTool: backing.registerTool.bind(backing)};
+  const binding = registerMealWebMcp({documentRef: {modelContext: native}, windowRef: new FakeWindow(), ...callbacks});
+  assert.equal(await binding.ready, true);
+  assert.equal((await backing.getTools()).length, 3);
+  assert.equal(native.getTools, undefined, 'registration preserves the partial native implementation');
+  binding.dispose();
+  assert.equal((await backing.getTools()).length, 0);
+
+  let attempts = 0;
+  const failing = {async registerTool(tool, options) {
+    if (++attempts === 2) throw new Error('Browser registration denied');
+    await backing.registerTool(tool, options);
+  }};
+  const denied = registerMealWebMcp({documentRef: {modelContext: failing}, windowRef: new FakeWindow(), ...callbacks});
+  assert.equal(await denied.ready, false);
+  assert.equal((await backing.getTools()).length, 0, 'a failure removes the partially registered batch');
+  denied.dispose();
+});
+
+test('the calorie page keeps its ordinary UI boot path without document.modelContext', async () => {
+  const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
+  let source = await readFile(new URL('app.mjs', base), 'utf8');
+  source = source
+    .replace(/^import .* from '\.\/nutrition\.mjs';\s*$/m, '')
+    .replace(/^import .* from '\.\/webmcp\.mjs';\s*$/m, '');
+  class Element {
+    constructor(id = '') {
+      this.id = id;
+      this.value = '';
+      this.hidden = false;
+      this.disabled = false;
+      this.textContent = '';
+      this.listeners = new Map();
+      this.children = [];
+    }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    replaceChildren(...children) { this.children = children; }
+    append(...children) { this.children.push(...children); }
+  }
+  const elements = new Map();
+  const document = {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, new Element(id));
+      return elements.get(id);
+    },
+  };
+  const localStorage = {length: 0, getItem: () => '[]', setItem() {}, removeItem() {}, key: () => null};
+  const sessionStorage = {length: 0, getItem: () => null, setItem() {}, removeItem() {}, key: () => null};
+  const window = {localApp: {}, listeners: new Map(), addEventListener(type, listener) { this.listeners.set(type, listener); }};
+  const context = {localApp: {}, localStorage, sessionStorage};
+  const nutrition = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs');
+  const webmcp = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/webmcp.mjs');
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const runApp = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'sessionStorage', 'nutrition', 'webmcp',
+    `const {nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord} = nutrition;\n`
+      + `const {applyUnsavedMealPortion, registerMealWebMcp, summarizeMealDraft, summarizeSavedMealRecords} = webmcp;\n`
+      + `${source}\nreturn {document, window};`);
+
+  const app = await runApp(context, document, window, localStorage, sessionStorage, nutrition, webmcp);
+  for (const id of ['photo-choose', 'camera-open', 'analyze', 'cancel', 'save']) {
+    assert.equal(typeof app.document.getElementById(id)?.listeners.get('click'), 'function', `${id} UI remains wired`);
+  }
+  assert.match(app.document.getElementById('status').textContent, /普通浏览器无法调用宿主 Agent/);
+  assert.equal(document.modelContext, undefined);
+  assert.deepEqual([...window.listeners.keys()], ['pagehide'], 'only ordinary camera cleanup was installed');
 });
 
 test('persistent chat restores the same thread read-only and starts runs only for new user turns', async () => {
@@ -294,11 +560,13 @@ test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent co
     readFile(new URL('plugins/local-app-builder/skills/create-local-app/SKILL.md', root), 'utf8'),
     readFile(new URL('plugins/local-app-builder/skills/create-local-app/references/host-agent.md', root), 'utf8'),
   ]);
-  assert.equal(JSON.parse(plugin).version, '6.0.0');
-  for (const document of [readme, skill, reference]) {
+  assert.equal(JSON.parse(plugin).version, '6.1.0');
+  for (const document of [readme, reference]) {
     assert.match(document, /AG-UI 1\.0/);
     assert.match(document, /RunAgentInput/);
   }
+  assert.match(skill, /AG-UI 1\.0/);
+  assert.match(skill, /references\/host-agent\.md/);
   assert.match(reference, /Message\[\]/);
   assert.match(reference, /ContentPart/);
   assert.match(reference, /BaseEvent/);

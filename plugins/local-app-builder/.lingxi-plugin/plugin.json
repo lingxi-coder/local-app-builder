@@ -1,8 +1,8 @@
 {
   "name": "local-app-builder",
   "displayName": "Local App Builder",
-  "version": "6.0.0",
-  "description": "Build schema-2 Local Apps for Desktop and mobile with AG-UI 1.0 host Agent runs, persistent threads, standard ContentParts, packaged Skills and approved services.",
+  "version": "6.1.0",
+  "description": "Create and modify schema-2 Local Apps with WebMCP business tools, AG-UI 1.0 host Agent runs, persistent threads and approved services.",
   "author": {
     "name": "LingXi"
   },

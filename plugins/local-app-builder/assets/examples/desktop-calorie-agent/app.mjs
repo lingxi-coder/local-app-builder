@@ -5,6 +5,7 @@ if (!globalThis.localApp) {
 }
 
 import { nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord } from './nutrition.mjs';
+import { applyUnsavedMealPortion, registerMealWebMcp, summarizeMealDraft, summarizeSavedMealRecords } from './webmcp.mjs';
 
 const $ = (id) => document.getElementById(id);
 const agent = window.localApp?.agent;
@@ -184,6 +185,32 @@ function updateTotal() {
   }
 }
 
+function currentMealDraftSummary() {
+  return summarizeMealDraft({
+    result,
+    edits: result ? edits() : [],
+    canSave: Boolean(completedRunId),
+    busy,
+  });
+}
+
+function updateUnsavedDraftPortion(input) {
+  if (busy || !result || !completedRunId) throw new Error('There is no completed, unsaved estimate to edit.');
+  const rows = [...$('food-items').querySelectorAll('.food')];
+  const row = rows[input.itemIndex];
+  const nameField = row?.querySelector('[data-field="name"]');
+  const gramsField = row?.querySelector('[data-field="grams"]');
+  if (!nameField || !gramsField) throw new RangeError('itemIndex is outside the current meal draft.');
+
+  const change = applyUnsavedMealPortion({ result, edits: edits(), canSave: true, busy }, input);
+  nameField.value = change.edits[input.itemIndex].name;
+  gramsField.value = change.edits[input.itemIndex].grams;
+  const inputEvent = new Event('input', { bubbles: true });
+  nameField.dispatchEvent(inputEvent);
+  gramsField.dispatchEvent(new Event('input', { bubbles: true }));
+  return { updated: true, item: change.item, calorieRange: change.summary.calorieRange, canSave: change.summary.canSave };
+}
+
 function listText(id, heading, entries) {
   $(id).replaceChildren();
   if (!entries.length) return;
@@ -304,6 +331,10 @@ function readHistory() {
   return saved;
 }
 
+function listSavedMealSummaries(limit) {
+  return summarizeSavedMealRecords(readHistory(), limit);
+}
+
 function renderHistory() {
   const records = readHistory();
   $('history').replaceChildren();
@@ -342,3 +373,14 @@ if (!agent) {
 } else {
   setBusy(false);
 }
+
+// Browser agents can discover these app-scoped tools only when the host
+// exposes the official document.modelContext API. Unsupported browsers keep
+// the ordinary UI; registering tools never starts or saves an Agent run.
+registerMealWebMcp({
+  documentRef: document,
+  windowRef: window,
+  getDraftSummary: currentMealDraftSummary,
+  updateDraftPortion: updateUnsavedDraftPortion,
+  listSavedRecords: listSavedMealSummaries,
+});

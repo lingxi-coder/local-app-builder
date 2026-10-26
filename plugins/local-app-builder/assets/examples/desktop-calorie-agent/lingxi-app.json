@@ -41,7 +41,8 @@
       "index.html",
       "styles.css",
       "app.mjs",
-      "nutrition.mjs"
+      "nutrition.mjs",
+      "webmcp.mjs"
     ],
     "dependencyLocks": []
   },

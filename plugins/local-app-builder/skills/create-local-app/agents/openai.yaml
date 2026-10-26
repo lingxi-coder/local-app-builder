@@ -1,4 +1,4 @@
 interface:
-  display_name: "Create Local App"
-  short_description: "Build a local web app and publish or open it"
-  default_prompt: "Use $create-local-app to agree on the app with the user, then scaffold, implement and build a local web app, and publish it to the app library or open it in the browser."
+  display_name: "Create or Modify Local App"
+  short_description: "Build and update Local Apps with business WebMCP tools"
+  default_prompt: "Use $create-local-app to create or modify the App in its source Project, add appropriate WebMCP business tools, test it, and publish the release."

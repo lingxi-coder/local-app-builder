@@ -8,7 +8,7 @@
     {
       "name": "local-app-builder",
       "source": "./plugins/local-app-builder",
-      "description": "Plan, scaffold and build local web apps from templates, then publish them to LingXi's app library or open them in the browser."
+      "description": "Create or modify Local Apps with WebMCP business tools and optional host Agent runs, then publish and verify releases."
     }
   ]
 }
