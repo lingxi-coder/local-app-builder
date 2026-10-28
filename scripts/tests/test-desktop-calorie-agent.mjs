@@ -590,6 +590,7 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
     async info() { return {revision: 'rev-1'}; },
     agent: {
       chats: {
+        async pendingCreations() { return []; },
         async list(options) {
           calls.chatLists.push(options);
           return calls.chatLists.length === 1
@@ -722,6 +723,7 @@ test('a persistent Chat run sends only its new user Message, not historical File
     async info() { return {revision: 'rev-1'}; },
     agent: {
       chats: {
+        async pendingCreations() { return []; },
         async list() { return {chats: [{chatId: 'chat-1', title: 'Saved chat'}]}; },
         async open(id) { assert.equal(id, 'chat-1'); return chat; },
       },

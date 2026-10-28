@@ -30,6 +30,14 @@
       <p id="recovery-warning" class="draft" role="status" hidden></p>
       <p id="creation-draft" class="draft" role="status" hidden></p>
       <p id="chat-list-warning" class="draft" role="status" hidden></p>
+      <section id="creation-receipts-panel" aria-label="Saved creation receipts" hidden>
+        <div class="toolbar">
+          <label for="creation-receipts">Saved creation IDs</label>
+          <select id="creation-receipts"><option value="">Choose an exact saved creation ID</option></select>
+          <button id="restore-creation" type="button" disabled>Check selected ID</button>
+        </div>
+        <p id="creation-receipts-note"></p>
+      </section>
       <section id="messages" class="messages" aria-label="Chat history"></section>
       <section class="composer" aria-label="Send a review message">
         <label class="skill-choice"><input id="use-skill" type="checkbox" checked> Use the packaged review Skill</label>

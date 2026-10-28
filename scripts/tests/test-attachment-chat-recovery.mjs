@@ -73,12 +73,19 @@ async function boot({localApp, indexedDB, storage = new MemoryStorage(), randomU
     localApp, indexedDB,
     crypto: {randomUUID: randomUUID || (() => { let id = 0; return () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`; })()},
   };
+  const windowListeners = new Map();
+  const window = {addEventListener(type, listener) {
+    if (!windowListeners.has(type)) windowListeners.set(type, []);
+    windowListeners.get(type).push(listener);
+  }};
   const Option = class { constructor(label, value) { this.label = label; this.value = value; } };
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'indexedDB', 'File', 'confirm', 'setInterval', 'Option',
-    `${source}\n${initialize ? 'await boot();' : ''}\nreturn {initialize: boot, sendTurn, createChat, checkChatCreation, checkSavedChats, updateControls, setFiles: (files) => { selectedFiles = files; }, pending: () => pendingDraft, pendingCreation: () => pendingCreation};`);
-  const fixture = await run(context, document, {addEventListener() {}}, storage, indexedDB, TestFile, () => false, () => 0, Option);
-  return {fixture, elements, storage};
+    `${source}\n${initialize ? 'await boot();' : ''}\nreturn {initialize: boot, sendTurn, createChat, checkChatCreation, checkSavedChats, restoreSelectedCreation, updateControls, setFiles: (files) => { selectedFiles = files; }, pending: () => pendingDraft, pendingCreation: () => pendingCreation};`);
+  const fixture = await run(context, document, window, storage, indexedDB, TestFile, () => false, () => 0, Option);
+  return {fixture, elements, storage, dispatch(type, detail) {
+    for (const listener of windowListeners.get(type) || []) listener({detail});
+  }};
 }
 
 function host({platform = 'desktop', getTask, file, runAgent, connectAgent}) {
@@ -87,6 +94,7 @@ function host({platform = 'desktop', getTask, file, runAgent, connectAgent}) {
     async info() { return {id: 'app-1', revision: 'rev-1', platform}; },
     agent: {
       chats: {
+        async pendingCreations() { return []; },
         async list() { return {chats: [{chatId: chat.id, title: 'Saved chat'}]}; },
         async open(id) { assert.equal(id, chat.id); return chat; },
       },
@@ -245,12 +253,12 @@ const creationKey = 'attachment-review:app-1:revision-rev-1:chat-creation';
 const creationId = 'a2a2a2a2-1212-4b4b-8c8c-121212121212';
 const creationFailure = (code) => Object.assign(new Error(code), {code});
 
-function creationHost({create, creationStatus, id = 'app-1', revision = 'rev-1'}) {
+function creationHost({create, creationStatus, pendingCreations = async () => [], id = 'app-1', revision = 'rev-1'}) {
   return {
     async info() { return {id, revision, platform: 'desktop'}; },
     agent: {
       chats: {
-        create, creationStatus,
+        create, creationStatus, pendingCreations,
         async list() { return {chats: []}; }, // Simulate a delayed list projection.
         async open(id) { return {id, async history() { return {messages: []}; }}; },
       },
@@ -581,12 +589,137 @@ test('unavailable whole-store reads retain data and identity without guessing a 
 });
 
 test('a history-read failure leaves the original saved Chat and creation intent intact', async () => {
-  const entries = [[creationKey, JSON.stringify({requestId: creationId})], ['attachment-review:revision-rev-1:chatId', 'saved-chat']];
+  const entries = [[creationKey, JSON.stringify({requestId: creationId})], ['attachment-review:revision-rev-1:chatId', creationId]];
   const storage = new MemoryStorage(entries);
-  const {localApp} = chatListHost([{chats: [{chatId: 'saved-chat'}], hasUncertainChats: false}]);
+  const {localApp} = chatListHost([{chats: [{chatId: creationId}], hasUncertainChats: false}]);
   localApp.agent.chats.open = async (id) => ({id, async history() { throw new Error('Cannot verify existing storage'); }});
   const {fixture, elements} = await boot({localApp, storage, initialize: false});
   await assert.rejects(fixture.initialize(), /Cannot verify existing storage/);
   assert.deepEqual([...storage.records], entries);
   assert.match(elements.get('chat-list-warning').textContent, /Existing data and saved identities were left untouched/);
+});
+
+test('the SDK pending hint only updates the matching creation display without navigation or retry', async () => {
+  const calls = {create: 0, status: 0, hostOpen: 0};
+  let entered;
+  let release;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const localApp = creationHost({
+    async create(options) { calls.create++; entered(); await gate; return {id: options.requestId}; },
+    async creationStatus() { calls.status++; return null; },
+  });
+  localApp.host = {open() { calls.hostOpen++; }};
+  const {fixture, elements, storage, dispatch} = await boot({localApp, randomUUID: () => creationId});
+  const pending = fixture.createChat();
+  await started;
+  const saved = storage.getItem(creationKey);
+  const before = elements.get('status').textContent;
+  dispatch('localApp:chat-creation-pending', {requestId: '00000000-0000-4000-8000-000000000999'});
+  assert.equal(elements.get('status').textContent, before, 'another request cannot change this request display');
+  dispatch('localApp:chat-creation-pending', {requestId: creationId});
+  assert.match(elements.get('status').textContent, /still waiting/);
+  assert.match(elements.get('status').textContent, /reopen this App/);
+  assert.doesNotMatch(elements.get('status').textContent, /failed|cancelled/);
+  assert.deepEqual(calls, {create: 1, status: 0, hostOpen: 0});
+  assert.equal(storage.getItem(creationKey), saved);
+  release();
+  await pending;
+});
+
+test('a new page restores its own display read-only without resurrecting the old creation Promise', async () => {
+  const storage = new MemoryStorage();
+  const options = {requestId: creationId, title: 'Attachment review'};
+  let release;
+  let entered;
+  let accepted = false;
+  let oldPromiseSettled = false;
+  let creates = 0;
+  let reads = 0;
+  const opens = [];
+  const started = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const localApp = creationHost({
+    async pendingCreations() { return creates ? [{...options, state: accepted ? 'accepted' : 'pending'}] : []; },
+    async create(value) { creates++; assert.deepEqual(value, options); entered(); await gate; return {id: value.requestId}; },
+    async creationStatus(value) { reads++; assert.deepEqual(value, options); return accepted ? {id: value.requestId} : null; },
+  });
+  localApp.agent.chats.list = async () => ({chats: [{chatId: 'other-existing-chat'}]});
+  localApp.agent.chats.open = async (id) => { opens.push(id); return {id, async history() { return {messages: []}; }}; };
+  const first = await boot({localApp, storage, randomUUID: () => creationId});
+  const oldPromise = first.fixture.createChat().then(() => { oldPromiseSettled = true; });
+  await started;
+  accepted = true; // SDK/host receipt changed; the old page wait is still unresolved.
+  opens.length = 0;
+  const reloaded = await boot({localApp, storage});
+  assert.equal(oldPromiseSettled, false);
+  assert.equal(creates, 1, 'new page does not recreate or replay');
+  assert.equal(reads, 1, 'the App makes one bounded same-ID status check for its own record');
+  assert.deepEqual(opens, [creationId], 'restore does not select a different listed Chat before the saved identity is confirmed');
+  assert.match(reloaded.elements.get('status').textContent, /creation is confirmed/);
+  assert.equal(storage.getItem('attachment-review:revision-rev-1:chatId'), creationId);
+  release();
+  await oldPromise;
+});
+
+test('SDK receipts alone neither select nor open a Chat until the user chooses an exact ID', async () => {
+  const otherId = '00000000-0000-4000-8000-000000000999';
+  const options = {requestId: creationId, title: '  Original title  '};
+  const reads = [];
+  const opens = [];
+  const localApp = creationHost({
+    async pendingCreations() { return [{requestId: otherId, state: 'pending'}, {...options, state: 'accepted'}]; },
+    async create() { assert.fail('receipt restoration cannot create'); },
+    async creationStatus(value) { reads.push(structuredClone(value)); return {id: value.requestId}; },
+  });
+  localApp.agent.chats.open = async (id) => { opens.push(id); return {id, async history() { return {messages: []}; }}; };
+  const {fixture, elements} = await boot({localApp});
+  assert.deepEqual(reads, []);
+  assert.deepEqual(opens, []);
+  assert.equal(elements.get('creation-receipts').value, '');
+  assert.equal(elements.get('restore-creation').disabled, true);
+  assert.ok(elements.get('creation-receipts').children.every((option) => !option.label.includes('Original title')));
+  await fixture.restoreSelectedCreation();
+  assert.deepEqual(reads, []);
+  elements.get('creation-receipts').value = creationId;
+  await fixture.restoreSelectedCreation();
+  assert.deepEqual(reads, [options], 'receipt state is not passed as a host creation option');
+  assert.deepEqual(opens, [creationId]);
+});
+
+test('a selected pending receipt stays uncertain after null and retries only by explicit same-ID action', async () => {
+  const options = {requestId: creationId};
+  const posts = [];
+  const reads = [];
+  const localApp = creationHost({
+    async pendingCreations() { return [{...options, state: 'pending'}]; },
+    async create(value) { posts.push(structuredClone(value)); return {id: value.requestId}; },
+    async creationStatus(value) { reads.push(structuredClone(value)); return null; },
+  });
+  const {fixture, elements, storage} = await boot({localApp, randomUUID() { assert.fail('must not replace the original ID'); }});
+  assert.deepEqual(reads, []);
+  elements.get('creation-receipts').value = creationId;
+  await fixture.restoreSelectedCreation();
+  assert.deepEqual(reads, [options]);
+  assert.deepEqual(posts, []);
+  assert.deepEqual(JSON.parse(storage.getItem(creationKey)), options, 'omitted title remains omitted');
+  assert.match(elements.get('status').textContent, /may still be in flight/);
+  await fixture.createChat({retry: true});
+  assert.deepEqual(posts, [options]);
+  assert.deepEqual(reads, [options, options]);
+});
+
+test('unavailable SDK receipts do not fabricate a business request or change existing data', async () => {
+  const storage = new MemoryStorage([['business-data', 'keep']]);
+  const localApp = creationHost({
+    async pendingCreations() { throw new Error('Receipt storage is unavailable'); },
+    async create() { assert.fail('no automatic creation'); },
+    async creationStatus() { assert.fail('no saved original identity to query'); },
+  });
+  const {fixture, elements} = await boot({localApp, storage});
+  assert.match(elements.get('creation-receipts-note').textContent, /Receipt storage is unavailable/);
+  assert.equal(fixture.pendingCreation(), null);
+  assert.deepEqual([...storage.records], [['business-data', 'keep']]);
+  await fixture.restoreSelectedCreation();
+  assert.deepEqual([...storage.records], [['business-data', 'keep']]);
 });

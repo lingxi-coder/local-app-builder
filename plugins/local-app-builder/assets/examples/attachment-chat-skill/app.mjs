@@ -14,6 +14,12 @@ let ready = false;
 let chatCreationKey = null;
 let pendingCreation = null;
 let creationStorageProblem = null;
+let savedCreationReceipts = [];
+
+window.addEventListener('localApp:chat-creation-pending', (event) => {
+  if (!pendingCreation || event?.detail?.requestId !== pendingCreation.requestId) return;
+  setStatus('Chat creation is still waiting; the request may already have arrived. Keep its original ID. Use Open LingXi in the host recovery prompt if needed, then reopen this App. No retry or navigation was started automatically.');
+});
 
 function showRecoveryWarning() {
   $('recovery-warning').textContent = 'Offline recovery is unavailable in this browser. Keep this page open while the host is paused.';
@@ -151,6 +157,8 @@ function updateControls() {
   $('use-skill').disabled = busy || Boolean(pendingDraft);
   $('chat-list').disabled = busy || Boolean(pendingDraft);
   $('check-chats').disabled = !ready || busy;
+  $('creation-receipts').disabled = !ready || busy || Boolean(pendingDraft);
+  $('restore-creation').disabled = !ready || busy || Boolean(pendingDraft) || !$('creation-receipts').value;
   $('new-chat').disabled = !ready || !app || busy || Boolean(pendingDraft) || Boolean(pendingCreation) || Boolean(creationStorageProblem);
   $('check-creation').hidden = !pendingCreation;
   $('retry-creation').hidden = !pendingCreation;
@@ -432,6 +440,55 @@ function restoreChatCreation() {
   }
 }
 
+async function loadCreationReceipts() {
+  const panel = $('creation-receipts-panel');
+  const select = $('creation-receipts');
+  select.replaceChildren(new Option('Choose an exact saved creation ID', ''));
+  select.value = '';
+  savedCreationReceipts = [];
+  try {
+    // The SDK may reconcile its receipts on reload. This local read does not restore our UI or a previous Promise.
+    const records = await app.agent.chats.pendingCreations();
+    if (!Array.isArray(records)) throw new Error('The host returned invalid creation receipts.');
+    savedCreationReceipts = records.map((record) => {
+      if (!record || !['pending', 'accepted', 'deleted', 'rejected'].includes(record.state)) {
+        throw new Error('A saved creation receipt has an invalid state.');
+      }
+      return {options: originalCreationOptions({requestId: record.requestId,
+        ...(Object.hasOwn(record, 'title') ? {title: record.title} : {})}), state: record.state};
+    });
+    for (const record of savedCreationReceipts) {
+      select.add(new Option(`${record.options.requestId} (${record.state})`, record.options.requestId));
+    }
+    panel.hidden = savedCreationReceipts.length === 0;
+    $('creation-receipts-note').textContent = 'These receipts belong to this App and revision. Choose an exact ID to check it read-only. No Chat is selected or created from this list automatically.';
+  } catch (failure) {
+    panel.hidden = false;
+    $('creation-receipts-note').textContent = `Saved creation receipts are unavailable: ${failure.message}. Existing data was kept; no new request was sent.`;
+  }
+  updateControls();
+}
+
+async function restoreSelectedCreation() {
+  if (!ready || busy || pendingDraft || creationStorageProblem) return;
+  const saved = savedCreationReceipts.find((record) => record.options.requestId === $('creation-receipts').value);
+  if (!saved) { setStatus('Choose the exact saved creation ID before checking it.'); return; }
+  busy = true;
+  updateControls();
+  try {
+    restoreChatCreation();
+    if (creationStorageProblem) throw new Error(creationStorageProblem);
+    const options = originalCreationOptions(saved.options);
+    if (pendingCreation && JSON.stringify(originalCreationOptions(pendingCreation)) !== JSON.stringify(options)) {
+      throw new Error('Another original creation request is saved. Check or review it before choosing a different ID.');
+    }
+    localStorage.setItem(chatCreationKey, JSON.stringify(options));
+    pendingCreation = options;
+    await checkCreationStatus(); // An explicit selection restores our display; it never creates the Chat.
+  } catch (failure) { setStatus(`${failure.message}. No creation was submitted and no replacement ID was generated.`); }
+  finally { busy = false; updateControls(); }
+}
+
 async function acceptCreatedChat(created) {
   if (created?.id !== pendingCreation?.requestId) throw new Error('The host returned a different Chat creation identity. The original request remains saved.');
   const original = JSON.stringify(originalCreationOptions(pendingCreation));
@@ -619,7 +676,8 @@ async function boot() {
   drafts = globalThis.indexedDB ? new DraftStore(info.revision) : null;
   pendingDraft = drafts ? await drafts.get() : null;
   restoreChatCreation();
-  await loadChatList(pendingDraft?.chatId);
+  await loadCreationReceipts();
+  await loadChatList(pendingDraft?.chatId || pendingCreation?.requestId);
   if (!pendingDraft && drafts?.expired) setStatus('The saved retry draft expired after 24 hours and was deleted. It was not sent again automatically.');
   else if (!drafts) setStatus(mobileAgentStorageUnavailable()
     ? 'IndexedDB is unavailable. This mobile host cannot submit Agent runs without it. Enable browser storage or reopen in a browser context that allows it.'
@@ -649,6 +707,8 @@ $('prompt').addEventListener('input', updateControls);
 $('new-chat').addEventListener('click', () => void createChat().catch((failure) => setStatus(failure.message)));
 $('check-chats').addEventListener('click', () => void checkSavedChats());
 $('check-creation').addEventListener('click', () => void checkChatCreation());
+$('creation-receipts').addEventListener('change', updateControls);
+$('restore-creation').addEventListener('click', () => void restoreSelectedCreation());
 $('retry-creation').addEventListener('click', () => void createChat({retry: true}));
 $('forget-creation').addEventListener('click', () => {
   if (busy || !confirm('Forget this saved creation request? A Chat may already exist or still be created. Review saved Chats first. Forgetting does not cancel creation or create a replacement.')) return;
