@@ -99,13 +99,30 @@ Every incoming event is an official `BaseEvent` union member. Events include run
 
 ## Persistent Chat threads
 
-The host Chat resource creates a stable thread ID and maps that ID to its durable Harness Session. Open the resource, construct the same official client with its ID, and restore the official history before rendering or allowing a new turn:
+The host Chat resource creates a stable thread ID and maps that ID to its durable Harness Session. Chat creation is a host resource API, not an AG-UI standard operation. The current API is `agent.chats.create({requestId, title?})`; `requestId` is a required browser-generated lowercase canonical UUIDv4, and the returned handle's `id` equals that request ID. When present, `title` must be a string. Save the original options durably **before** the first submission, preserving exact whitespace and the distinction between an omitted title and an explicitly supplied title. Do not regenerate the ID, normalize the title, or fill in an omitted title on retry. The same ID with the same original input returns the same Chat; conflicting input rejects with `chat_create_conflict`, and a deleted creation rejects with `chat_create_deleted` rather than resurrecting it. There is no API compatibility path for a creation without `requestId`.
+
+Create only from a user's explicit **New Chat** action. For example, after checking there is no unresolved saved creation:
 
 ```js
-const chat = savedChatId
-  ? await agent.chats.open(savedChatId)
-  : await agent.chats.create({title: 'Attachment review'});
-savedChatId = chat.id;
+const {id: appId, revision} = await localApp.info();
+const creationKey = `my-app:${appId}:${revision}:pending-chat-creation`;
+const selectedKey = `my-app:${appId}:${revision}:selected-chat-id`;
+const options = {requestId: crypto.randomUUID(), title: 'Attachment review'};
+localStorage.setItem(creationKey, JSON.stringify(options)); // must succeed before submission
+const created = await agent.chats.create(options);
+if (created.id !== options.requestId) throw new Error('Unexpected Chat identity');
+localStorage.setItem(selectedKey, created.id); // retain identity before clearing the intent
+if (localStorage.getItem(creationKey) === JSON.stringify(options)) localStorage.removeItem(creationKey);
+```
+
+If a request fails with `host_unavailable`, `chat_storage_uncertain` or another ambiguous transport/storage error, keep the saved options. Use `await agent.chats.creationStatus(options)` to query read-only: it returns the same Chat handle or `null`. A `null` means only that the Chat is not currently visible; the original creation may still be in flight. On refresh or failure, never automatically call `create`, generate a replacement ID, or create from the absence of `selected-chat-id`. Only an explicit **Retry saved creation** action may call `create` again, after a read-only check, using the exact saved ID and original options. Stop and explain `chat_create_conflict` or `chat_create_deleted`; do not silently change input or allocate another ID.
+
+`await agent.chats.pendingCreations()` returns this browser's saved same-App, same-revision creation intents as `{requestId, title?, state}` with state `pending`, `accepted`, `deleted` or `rejected`; it does not submit a request. The latter two require an explicit host deletion/rejection result; uncertain network outcomes stay `pending`. Let the user select a specific saved request ID rather than guessing by title or newest record, and clean up resolved local receipts only explicitly. It may help recover an intact original intent. Pass only `{requestId, title?}` to `creationStatus` or `create`, preserving title omission; never pass the record's `state` as a creation option. Keep your own UI/business record partitioned by `localApp.info().id` and `revision`; never replay an intent from another App or revision. Handle unavailable, cleared or corrupt browser storage. If the request ID or exact original input cannot be recovered, do not reconstruct a retry: list existing Chats read-only, explain the uncertainty, and require user review before discarding the record and separately starting a new Chat. Forgetting a local record does not cancel an in-flight creation or delete a host Chat. The complete [attachment Chat example](../../../assets/examples/attachment-chat-skill/README.md) implements explicit check/retry controls.
+
+Once a saved or confirmed Chat ID is available, open the resource, construct the official client with its ID, and restore history before rendering or allowing a new turn. Ordinary startup with no ID should offer selection/creation controls without submitting anything:
+
+```js
+const chat = await agent.chats.open(savedChatId);
 async function readAllHistory(chat) {
   const messages = [];
   let cursor;
@@ -152,6 +169,8 @@ renderMessages(history);
 Do not resend the historical user/assistant messages or their File bytes on every turn. The host Chat's stable `threadId` selects its canonical Harness transcript; `RunAgentInput.messages` supplies only the new user message. Replaying old files can exceed the 116 MiB run-input limit even though each new message is within its attachment limit and the Chat remains below its larger asset-storage cap. Do not create a new Chat or thread for each turn. To reconnect to the host's read-only stream/history, use the host adapter's `connectAgent({runId})` implementation with a fresh client that has no `initialMessages`; it replays existing protocol events and does not create a model request. `connectAgent()` is for restoration, while `runAgent()` is only for a user-submitted turn.
 
 The host Chat history is paged as `{messages: Message[], nextCursor?}`. Continue with the returned cursor until all needed pages have been read before replacing the client history; `chats.list` summaries identify a resource with `chatId`, while an opened Chat handle's `id` is its AG-UI `threadId`. Do not present one page as the entire conversation. Messages use the official `Message[]` union, not a parallel `{text,attachments}` model. Read content from the message's string or ordered `ContentPart[]`; do not assume every message is plain text. A Chat ID is an opaque app-scoped conversation identity, not a credential or provider ID. Host tools still require their separate trusted UI grant.
+
+Across Desktop and Mobile, `chats.list()` may also return `unavailableChats: Array<{chatId, code: 'chat_storage_uncertain'}>` and `hasUncertainChats: boolean`. `unavailableChats` contains IDs **on that page only**; continue pagination even when `chats` is empty. `hasUncertainChats` is an App-wide signal on every page, so `true` can appear before the page containing any unavailable ID. Preserve an observed `true` while collecting pages; never replace it with the current page's empty array or a later omitted field. An omitted field does not prove there is no corruption or unconfirmed Chat. Show uncertainty when the host has not established the state, and keep the original Chat IDs and inputs. An unavailable or unlisted Chat is not proven deleted or nonexistent. Do not automatically replay its work, create a replacement, or silently select a different Chat as its continuation. Offer read-only list/status checks and direct the user to review the state in LingXi. `creationStatus` still requires the saved request ID and exact original creation options; do not fabricate them from an unavailable list entry.
 
 ## Optional run ledger
 

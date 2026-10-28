@@ -10,6 +10,10 @@ let pendingRequestMissingRunId = null;
 let busy = false;
 let activeRunClient = null;
 let drafts = null;
+let ready = false;
+let chatCreationKey = null;
+let pendingCreation = null;
+let creationStorageProblem = null;
 
 function showRecoveryWarning() {
   $('recovery-warning').textContent = 'Offline recovery is unavailable in this browser. Keep this page open while the host is paused.';
@@ -138,7 +142,16 @@ function updateControls() {
   $('prompt').disabled = busy || Boolean(pendingDraft);
   $('use-skill').disabled = busy || Boolean(pendingDraft);
   $('chat-list').disabled = busy || Boolean(pendingDraft);
-  $('new-chat').disabled = busy || Boolean(pendingDraft);
+  $('check-chats').disabled = !ready || busy;
+  $('new-chat').disabled = !ready || !app || busy || Boolean(pendingDraft) || Boolean(pendingCreation) || Boolean(creationStorageProblem);
+  $('check-creation').hidden = !pendingCreation;
+  $('retry-creation').hidden = !pendingCreation;
+  $('check-creation').disabled = $('retry-creation').disabled = !ready || busy || Boolean(pendingDraft);
+  $('forget-creation').hidden = !pendingCreation && !creationStorageProblem;
+  $('forget-creation').disabled = busy;
+  $('creation-draft').hidden = !pendingCreation && !creationStorageProblem;
+  $('creation-draft').textContent = creationStorageProblem || (pendingCreation
+    ? `Chat creation ${pendingCreation.requestId} is saved. Check its status, or explicitly retry the same saved request. A missing result does not mean creation failed.` : '');
   $('cancel').hidden = !activeRunClient;
   $('clear-draft').hidden = !pendingDraft || busy;
   $('archive-chat').disabled = busy || !chat || Boolean(pendingDraft);
@@ -273,20 +286,37 @@ async function attachFiles() {
 }
 
 function chatIdentity(summary) { return summary.chatId; }
-async function loadChatList(preferredId) {
+async function loadChatList(preferredId, confirmedChat = null) {
   const chats = [];
+  const unavailableIds = new Set();
+  let anyUncertainChats = false;
+  let allPagesExplicitlyClear = true;
   let cursor;
   do {
     const options = {limit: 50, includeArchived: false};
     if (cursor) options.cursor = cursor;
     const page = await app.agent.chats.list(options);
     if (!page || !Array.isArray(page.chats)) throw new Error('The host returned invalid AG-UI chat summaries.');
+    if ((page.hasUncertainChats !== undefined && typeof page.hasUncertainChats !== 'boolean')
+        || (page.unavailableChats !== undefined && (!Array.isArray(page.unavailableChats)
+          || page.unavailableChats.some((item) => !item || typeof item.chatId !== 'string' || !item.chatId
+            || item.code !== 'chat_storage_uncertain')))) {
+      throw new Error('The host returned invalid unavailable Chat status.');
+    }
+    // IDs belong to this page; the boolean describes uncertainty anywhere in this App.
+    for (const item of page.unavailableChats || []) unavailableIds.add(item.chatId);
+    anyUncertainChats ||= page.hasUncertainChats === true;
+    allPagesExplicitlyClear &&= page.hasUncertainChats === false;
     chats.push(...page.chats);
     if (page.nextCursor !== undefined && (typeof page.nextCursor !== 'string' || !page.nextCursor || page.nextCursor === cursor)) {
       throw new Error('The host returned an invalid AG-UI chat cursor.');
     }
     cursor = page.nextCursor;
   } while (cursor);
+  // Creation status can confirm an ID before the list reflects it.
+  if (confirmedChat && !chats.some((item) => chatIdentity(item) === confirmedChat.id)) {
+    chats.push({chatId: confirmedChat.id, title: pendingCreation?.title});
+  }
   const select = $('chat-list');
   select.replaceChildren(new Option('Choose a saved chat', ''));
   for (const summary of chats) {
@@ -294,16 +324,38 @@ async function loadChatList(preferredId) {
     select.add(new Option(summary.title || id, id));
   }
   const savedId = preferredId || localStorage.getItem(`attachment-review:revision-${info.revision}:chatId`);
-  const selected = chats.find((item) => chatIdentity(item) === savedId) || chats[0];
+  // A missing or unavailable saved ID is not permission to switch to another Chat.
+  const selected = savedId ? chats.find((item) => chatIdentity(item) === savedId) : chats[0];
   if (selected) {
     select.value = chatIdentity(selected);
     await openChat(chatIdentity(selected));
   } else {
+    select.value = '';
     chat = null;
     client = null;
     renderMessages([]);
   }
+  const warnings = [];
+  if (anyUncertainChats || unavailableIds.size) {
+    warnings.push('Some Chats in this App need their status checked. Their saved data may still exist.');
+  } else if (!allPagesExplicitlyClear) {
+    warnings.push('The host did not confirm whether any Chats in this App need recovery. A missing warning does not establish that all saved data is healthy.');
+  }
+  if (unavailableIds.size) warnings.push(`Unavailable IDs on the pages read: ${[...unavailableIds].join(', ')}.`);
+  if (savedId && !selected) warnings.push(`Saved Chat ${savedId} is not currently available in this list. Its ID was kept; no other Chat was selected.`);
+  if (warnings.length) warnings.push('Check saved Chats again or review their status in LingXi. Nothing was replayed and no replacement Chat was created.');
+  $('chat-list-warning').textContent = warnings.join(' ');
+  $('chat-list-warning').hidden = warnings.length === 0;
   updateControls();
+}
+
+async function checkSavedChats() {
+  if (!ready || busy) return;
+  busy = true;
+  updateControls();
+  try { await loadChatList(pendingDraft?.chatId || chat?.id); }
+  catch (failure) { setStatus(`Saved Chat status is unavailable: ${failure.message}. No Chat was created and no Agent run was started.`); }
+  finally { busy = false; updateControls(); }
 }
 
 async function openChat(chatId) {
@@ -352,11 +404,81 @@ async function recoverSavedRun(draft, history, savedTask) {
   return true;
 }
 
-async function createChat() {
-  if (pendingDraft) throw new Error('Retry or forget the saved turn before changing Chats.');
-  const created = await app.agent.chats.create({title: 'Attachment review'});
-  await loadChatList(created.id);
-  setStatus('New persistent AG-UI thread created.');
+function originalCreationOptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || typeof value.requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.requestId)
+      || Object.keys(value).some((key) => key !== 'requestId' && key !== 'title')
+      || (Object.hasOwn(value, 'title') && typeof value.title !== 'string')) {
+    throw new Error('The saved Chat creation ID or original input is missing or invalid. Review saved Chats before forgetting this record. Nothing was submitted or assigned a replacement ID.');
+  }
+  return Object.hasOwn(value, 'title') ? {requestId: value.requestId, title: value.title} : {requestId: value.requestId};
+}
+
+function restoreChatCreation() {
+  try {
+    if (!chatCreationKey) throw new Error('The host has not supplied this App identity and revision.');
+    const saved = localStorage.getItem(chatCreationKey);
+    pendingCreation = saved === null ? null : originalCreationOptions(JSON.parse(saved));
+  } catch (failure) {
+    creationStorageProblem = `Chat creation cannot be safely restored: ${failure.message}`;
+  }
+}
+
+async function acceptCreatedChat(created) {
+  if (created?.id !== pendingCreation?.requestId) throw new Error('The host returned a different Chat creation identity. The original request remains saved.');
+  const original = JSON.stringify(originalCreationOptions(pendingCreation));
+  await loadChatList(created.id, created);
+  // Do not clear an intent saved by another page while the history read was pending.
+  if (localStorage.getItem(chatCreationKey) === original) localStorage.removeItem(chatCreationKey);
+  pendingCreation = null;
+  setStatus('The saved Chat creation is confirmed. Its history was opened without starting an Agent run.');
+}
+
+async function checkCreationStatus() {
+  if (!pendingCreation) throw new Error(creationStorageProblem || 'No saved Chat creation ID is available. Review saved Chats before explicitly creating a new one.');
+  const created = await app.agent.chats.creationStatus(originalCreationOptions(pendingCreation));
+  if (created) await acceptCreatedChat(created);
+  else setStatus('The saved Chat is not visible yet. The original request may still be in flight. Nothing was resubmitted; check again or explicitly retry the same request.');
+  return created;
+}
+
+async function checkChatCreation() {
+  if (!ready || busy || pendingDraft) return;
+  busy = true;
+  updateControls();
+  try { await checkCreationStatus(); }
+  catch (failure) { setStatus(`${failure.message}${failure.code ? ` (${failure.code})` : ''} The creation outcome remains unconfirmed. Nothing was submitted.`); }
+  finally { busy = false; updateControls(); }
+}
+
+async function createChat({retry = false} = {}) {
+  if (!ready || busy || pendingDraft) return;
+  busy = true;
+  updateControls();
+  try {
+    // Re-read before a user action so a saved intent from another tab is not knowingly overwritten.
+    restoreChatCreation();
+    if (creationStorageProblem) throw new Error(creationStorageProblem);
+    if (retry) {
+      if (!pendingCreation) throw new Error('No saved Chat creation ID is available. A retry cannot assign a replacement ID.');
+      if (await checkCreationStatus()) return;
+    } else {
+      if (pendingCreation) throw new Error('Check the saved Chat creation or explicitly retry it before creating another Chat.');
+      const options = originalCreationOptions({requestId: globalThis.crypto.randomUUID(), title: 'Attachment review'});
+      // Saving must succeed before the first POST. Preserve title omission, whitespace and all IDs on retry.
+      localStorage.setItem(chatCreationKey, JSON.stringify(options));
+      pendingCreation = options;
+    }
+    const created = await app.agent.chats.create(originalCreationOptions(pendingCreation));
+    await acceptCreatedChat(created);
+  } catch (failure) {
+    setStatus(`${failure.message}${failure.code ? ` (${failure.code})` : ''} No replacement request was sent.`);
+    // A failed POST may have committed. Only inspect the original request; never retry it here.
+    if (pendingCreation) {
+      try { await checkCreationStatus(); }
+      catch (checkFailure) { setStatus(`${failure.message}${failure.code ? ` (${failure.code})` : ''} Status is unavailable: ${checkFailure.message}. The exact creation request remains saved; nothing was resubmitted.`); }
+    }
+  } finally { busy = false; updateControls(); }
 }
 
 async function messageForDraft(draft) {
@@ -482,9 +604,13 @@ async function boot() {
     return;
   }
   info = await app.info();
+  if (typeof info.id === 'string' && info.id && info.revision !== undefined) {
+    chatCreationKey = `attachment-review:${info.id}:revision-${info.revision}:chat-creation`;
+  }
   if (info.recovery?.status === 'unavailable') showRecoveryWarning();
   drafts = globalThis.indexedDB ? new DraftStore(info.revision) : null;
   pendingDraft = drafts ? await drafts.get() : null;
+  restoreChatCreation();
   await loadChatList(pendingDraft?.chatId);
   if (!pendingDraft && drafts?.expired) setStatus('The saved retry draft expired after 24 hours and was deleted. It was not sent again automatically.');
   else if (!drafts) setStatus(mobileAgentStorageUnavailable()
@@ -498,6 +624,9 @@ async function boot() {
       : 'The saved input is incomplete. Check the original run read-only before deciding what to do next.');
   }
   showPendingRequestMissing();
+  ready = true;
+  if (creationStorageProblem) setStatus(creationStorageProblem);
+  else if (pendingCreation && !pendingDraft) await checkChatCreation();
   updateControls();
 }
 
@@ -510,6 +639,20 @@ $('file-input').addEventListener('change', () => {
 $('send').addEventListener('click', () => void sendTurn());
 $('prompt').addEventListener('input', updateControls);
 $('new-chat').addEventListener('click', () => void createChat().catch((failure) => setStatus(failure.message)));
+$('check-chats').addEventListener('click', () => void checkSavedChats());
+$('check-creation').addEventListener('click', () => void checkChatCreation());
+$('retry-creation').addEventListener('click', () => void createChat({retry: true}));
+$('forget-creation').addEventListener('click', () => {
+  if (busy || !confirm('Forget this saved creation request? A Chat may already exist or still be created. Review saved Chats first. Forgetting does not cancel creation or create a replacement.')) return;
+  if (!chatCreationKey) { setStatus('The host App identity is unavailable; no creation record was changed.'); return; }
+  try {
+    localStorage.removeItem(chatCreationKey);
+    pendingCreation = null;
+    creationStorageProblem = null;
+    setStatus('The local creation record was forgotten. Existing or in-flight host Chats are unchanged. A new Chat requires a separate explicit action.');
+  } catch (failure) { setStatus(failure.message); }
+  updateControls();
+});
 $('chat-list').addEventListener('change', () => {
   if ($('chat-list').value) void openChat($('chat-list').value).catch((failure) => setStatus(failure.message));
 });

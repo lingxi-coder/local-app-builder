@@ -50,7 +50,14 @@ class TestFile {
   constructor(name, size = 4) { this.name = name; this.size = size; }
 }
 
-async function boot({localApp, indexedDB}) {
+class MemoryStorage {
+  constructor(entries = []) { this.records = new Map(entries); }
+  getItem(key) { return this.records.get(key) ?? null; }
+  setItem(key, value) { this.records.set(key, String(value)); }
+  removeItem(key) { this.records.delete(key); }
+}
+
+async function boot({localApp, indexedDB, storage = new MemoryStorage(), randomUUID, initialize = true}) {
   const path = new URL('../../plugins/local-app-builder/assets/examples/attachment-chat-skill/app.mjs', import.meta.url);
   const original = await readFile(path, 'utf8');
   const source = original.replace(/\nvoid boot\(\)\.catch\(\(failure\) => setStatus\(failure\.message\)\);\s*$/, '');
@@ -64,21 +71,20 @@ async function boot({localApp, indexedDB}) {
   };
   const context = {
     localApp, indexedDB,
-    crypto: {randomUUID: (() => { let id = 0; return () => `generated-${++id}`; })()},
+    crypto: {randomUUID: randomUUID || (() => { let id = 0; return () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`; })()},
   };
-  const storage = {getItem() { return 'chat-1'; }, setItem() {}, removeItem() {}};
   const Option = class { constructor(label, value) { this.label = label; this.value = value; } };
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'indexedDB', 'File', 'confirm', 'setInterval', 'Option',
-    `${source}\nawait boot();\nreturn {sendTurn, updateControls, setFiles: (files) => { selectedFiles = files; }, pending: () => pendingDraft};`);
+    `${source}\n${initialize ? 'await boot();' : ''}\nreturn {initialize: boot, sendTurn, createChat, checkChatCreation, checkSavedChats, updateControls, setFiles: (files) => { selectedFiles = files; }, pending: () => pendingDraft, pendingCreation: () => pendingCreation};`);
   const fixture = await run(context, document, {addEventListener() {}}, storage, indexedDB, TestFile, () => false, () => 0, Option);
-  return {fixture, elements};
+  return {fixture, elements, storage};
 }
 
 function host({platform = 'desktop', getTask, file, runAgent, connectAgent}) {
   const chat = {id: 'chat-1', async history() { return {messages: []}; }};
   return {
-    async info() { return {revision: 'rev-1', platform}; },
+    async info() { return {id: 'app-1', revision: 'rev-1', platform}; },
     agent: {
       chats: {
         async list() { return {chats: [{chatId: chat.id, title: 'Saved chat'}]}; },
@@ -233,4 +239,318 @@ test('missing IndexedDB blocks mobile Agent submission without claiming Desktop 
   assert.match(desktop.elements.get('status').textContent, /Agent availability depends on this host/);
   await desktop.fixture.sendTurn();
   assert.equal(starts, 1);
+});
+
+const creationKey = 'attachment-review:app-1:revision-rev-1:chat-creation';
+const creationId = 'a2a2a2a2-1212-4b4b-8c8c-121212121212';
+const creationFailure = (code) => Object.assign(new Error(code), {code});
+
+function creationHost({create, creationStatus, id = 'app-1', revision = 'rev-1'}) {
+  return {
+    async info() { return {id, revision, platform: 'desktop'}; },
+    agent: {
+      chats: {
+        create, creationStatus,
+        async list() { return {chats: []}; }, // Simulate a delayed list projection.
+        async open(id) { return {id, async history() { return {messages: []}; }}; },
+      },
+      createClient(options) { return {messages: options.initialMessages || []}; },
+    },
+  };
+}
+
+test('ambiguous Chat creation survives refresh and only explicit retry submits the exact original request', async () => {
+  const storage = new MemoryStorage();
+  const posts = [];
+  const reads = [];
+  let release;
+  let entered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { entered = resolve; });
+  let idsGenerated = 0;
+  const localApp = creationHost({
+    async create(options) {
+      assert.deepEqual(JSON.parse(storage.getItem(creationKey)), options, 'intent must be durable before POST');
+      posts.push(structuredClone(options));
+      if (posts.length === 1) {
+        entered();
+        await gate;
+        throw creationFailure('host_unavailable');
+      }
+      return {id: options.requestId};
+    },
+    async creationStatus(options) { reads.push(structuredClone(options)); return null; },
+  });
+  const first = await boot({localApp, storage, randomUUID() { idsGenerated++; return creationId; }});
+  const initial = first.fixture.createChat();
+  await started;
+  await first.fixture.createChat();
+  release();
+  await initial;
+  assert.equal(posts.length, 1, 'duplicate taps do not generate a second request');
+  assert.equal(idsGenerated, 1);
+  assert.deepEqual(reads, [posts[0]], 'failed creation triggers only a same-input read');
+  assert.match(first.elements.get('status').textContent, /may still be in flight/);
+  const original = storage.getItem(creationKey);
+
+  const refreshed = await boot({localApp, storage, randomUUID() { throw new Error('refresh/retry must not replace the ID'); }});
+  assert.equal(posts.length, 1, 'refresh must not POST');
+  assert.equal(storage.getItem(creationKey), original);
+  assert.deepEqual(reads, [posts[0], posts[0]], 'refresh is read-only');
+  await refreshed.fixture.checkChatCreation();
+  assert.equal(posts.length, 1, 'the Check action never POSTs');
+  await refreshed.fixture.createChat({retry: true});
+  assert.equal(posts.length, 2);
+  assert.deepEqual(posts[1], posts[0]);
+  assert.equal(storage.getItem(creationKey), null);
+  assert.equal(storage.getItem('attachment-review:revision-rev-1:chatId'), creationId);
+  assert.equal(refreshed.elements.get('chat-list').value, creationId, 'a delayed list cannot select another Chat');
+});
+
+test('refresh recovers a confirmed creation without POST and preserves an omitted title', async () => {
+  const options = {requestId: creationId};
+  const storage = new MemoryStorage([[creationKey, JSON.stringify(options)]]);
+  const reads = [];
+  const localApp = creationHost({
+    async create() { assert.fail('confirmed creation must not POST again'); },
+    async creationStatus(value) { reads.push(structuredClone(value)); return {id: value.requestId}; },
+  });
+  const {fixture, elements} = await boot({localApp, storage});
+  assert.deepEqual(reads, [options]);
+  assert.equal(Object.hasOwn(reads[0], 'title'), false);
+  assert.equal(fixture.pendingCreation(), null);
+  assert.equal(storage.getItem(creationKey), null);
+  assert.match(elements.get('status').textContent, /creation is confirmed/);
+});
+
+test('explicit retry retains title whitespace and does not normalize saved options', async () => {
+  const options = {requestId: creationId, title: '  Original title\n'};
+  const storage = new MemoryStorage([[creationKey, JSON.stringify(options)]]);
+  const posts = [];
+  const localApp = creationHost({
+    async create(value) { posts.push(structuredClone(value)); return {id: value.requestId}; },
+    async creationStatus(value) { assert.deepEqual(value, options); return null; },
+  });
+  const {fixture} = await boot({localApp, storage});
+  assert.equal(posts.length, 0);
+  await fixture.createChat({retry: true});
+  assert.deepEqual(posts, [options]);
+});
+
+test('missing IDs, invalid UUIDs or original input never cause replacement creation on refresh or retry', async (t) => {
+  for (const options of [{title: 'lost ID'}, {requestId: creationId.toUpperCase()},
+    {requestId: creationId, title: null}, {requestId: creationId, title: 'saved', unexpected: true}]) {
+    await t.test(JSON.stringify(options), async () => {
+      const original = JSON.stringify(options);
+      const storage = new MemoryStorage([[creationKey, original]]);
+      const localApp = creationHost({
+        async create() { assert.fail('invalid record cannot POST'); },
+        async creationStatus() { assert.fail('invalid input cannot query status'); },
+      });
+      const {fixture, elements} = await boot({localApp, storage, randomUUID() { assert.fail('cannot generate a replacement ID'); }});
+      assert.equal(elements.get('new-chat').disabled, true);
+      assert.equal(elements.get('retry-creation').hidden, true);
+      await fixture.createChat({retry: true});
+      await fixture.createChat();
+      assert.equal(storage.getItem(creationKey), original);
+      assert.match(elements.get('status').textContent, /missing or invalid/);
+    });
+  }
+});
+
+test('a failed durable save prevents the first creation POST', async () => {
+  const storage = new MemoryStorage();
+  storage.setItem = () => { throw new Error('Browser storage is full'); };
+  const localApp = creationHost({
+    async create() { assert.fail('storage must be saved before POST'); },
+    async creationStatus() { assert.fail('no request exists to query'); },
+  });
+  const {fixture, elements} = await boot({localApp, storage});
+  await fixture.createChat();
+  assert.equal(fixture.pendingCreation(), null);
+  assert.match(elements.get('status').textContent, /Browser storage is full/);
+});
+
+test('initialization and a newly saved intent from another tab cannot be overwritten by New chat', async () => {
+  const options = {requestId: creationId, title: 'Other tab original'};
+  const storage = new MemoryStorage();
+  const reads = [];
+  const localApp = creationHost({
+    async create() { assert.fail('New chat cannot overwrite an unresolved intent'); },
+    async creationStatus(value) { reads.push(structuredClone(value)); return null; },
+  });
+  const {fixture, elements} = await boot({localApp, storage, initialize: false,
+    randomUUID() { assert.fail('cannot allocate an ID before restoring the pending creation'); }});
+  fixture.updateControls();
+  assert.equal(elements.get('new-chat').disabled, true);
+  await fixture.createChat();
+  assert.equal(reads.length, 0, 'initializing UI submits and queries nothing');
+  await fixture.initialize();
+  storage.setItem(creationKey, JSON.stringify(options));
+  await fixture.createChat();
+  assert.deepEqual(reads, [options], 'newly observed pending intent only receives a read-only check');
+  assert.deepEqual(JSON.parse(storage.getItem(creationKey)), options);
+});
+
+test('conflict, deleted and unavailable status checks retain the intent and prevent a retry POST', async (t) => {
+  for (const code of ['chat_create_conflict', 'chat_create_deleted', 'chat_storage_uncertain', 'host_unavailable']) {
+    await t.test(code, async () => {
+      const options = {requestId: creationId, title: 'Original'};
+      const original = JSON.stringify(options);
+      const storage = new MemoryStorage([[creationKey, original]]);
+      let reads = 0;
+      const localApp = creationHost({
+        async create() { assert.fail('failed status check cannot authorize a POST'); },
+        async creationStatus(value) { reads++; assert.deepEqual(value, options); throw creationFailure(code); },
+      });
+      const {fixture, elements} = await boot({localApp, storage});
+      await fixture.createChat({retry: true});
+      assert.ok(reads >= 2);
+      assert.equal(storage.getItem(creationKey), original);
+      assert.match(elements.get('status').textContent, new RegExp(code));
+      assert.equal(fixture.pendingCreation().requestId, creationId);
+    });
+  }
+});
+
+test('pending Chat creation is partitioned by App ID and revision', async (t) => {
+  for (const scope of [{id: 'app-2'}, {revision: 'rev-2'}]) {
+    await t.test(JSON.stringify(scope), async () => {
+      const original = JSON.stringify({requestId: creationId, title: 'Other scope'});
+      const storage = new MemoryStorage([[creationKey, original]]);
+      const localApp = creationHost({...scope,
+        async create() { assert.fail('startup must not POST'); },
+        async creationStatus() { assert.fail('another App/revision intent must not be queried'); },
+      });
+      const {fixture} = await boot({localApp, storage});
+      assert.equal(fixture.pendingCreation(), null);
+      assert.equal(storage.getItem(creationKey), original);
+    });
+  }
+});
+
+test('a confirmed creation does not remove a newer intent saved while history was loading', async () => {
+  const original = {requestId: creationId};
+  const newer = {requestId: 'b3b3b3b3-1212-4b4b-8c8c-121212121212', title: 'Newer intent'};
+  const storage = new MemoryStorage([[creationKey, JSON.stringify(original)]]);
+  const localApp = creationHost({
+    async create() { assert.fail('recovery must not POST'); },
+    async creationStatus(value) { assert.deepEqual(value, original); return {id: value.requestId}; },
+  });
+  localApp.agent.chats.open = async (id) => {
+    storage.setItem(creationKey, JSON.stringify(newer));
+    return {id, async history() { return {messages: []}; }};
+  };
+  await boot({localApp, storage});
+  assert.deepEqual(JSON.parse(storage.getItem(creationKey)), newer);
+});
+
+test('a mismatched host Chat ID leaves the original intent intact', async () => {
+  const original = JSON.stringify({requestId: creationId});
+  const storage = new MemoryStorage([[creationKey, original]]);
+  const localApp = creationHost({
+    async create() { assert.fail('recovery must not POST'); },
+    async creationStatus() { return {id: 'b3b3b3b3-1212-4b4b-8c8c-121212121212'}; },
+  });
+  const {elements} = await boot({localApp, storage});
+  assert.equal(storage.getItem(creationKey), original);
+  assert.match(elements.get('status').textContent, /different Chat creation identity/);
+});
+
+function chatListHost(pages) {
+  const calls = {lists: [], opens: []};
+  const localApp = creationHost({
+    async create() { assert.fail('listing must never create a replacement'); },
+    async creationStatus() { assert.fail('listing must not invent creation options'); },
+  });
+  localApp.agent.chats.list = async (options) => {
+    calls.lists.push(structuredClone(options));
+    return pages[options.cursor ? Number(options.cursor) : 0];
+  };
+  localApp.agent.chats.open = async (id) => {
+    calls.opens.push(id);
+    return {id, async history() { return {messages: []}; }};
+  };
+  return {localApp, calls};
+}
+
+test('page-local unavailable IDs do not erase an App-wide signal or replace the saved Chat', async () => {
+  const savedKey = 'attachment-review:revision-rev-1:chatId';
+  const storage = new MemoryStorage([[savedKey, 'unavailable-chat']]);
+  const {localApp, calls} = chatListHost([
+    {chats: [{chatId: 'healthy-chat', title: 'Available'}], hasUncertainChats: true, nextCursor: '1'},
+    {chats: [], unavailableChats: [{chatId: 'unavailable-chat', code: 'chat_storage_uncertain'}]},
+  ]);
+  const {fixture, elements} = await boot({localApp, storage});
+  assert.deepEqual(calls.lists.map((x) => x.cursor), [undefined, '1']);
+  assert.deepEqual(calls.opens, [], 'a healthy Chat is not silently selected instead of the saved unavailable one');
+  assert.equal(storage.getItem(savedKey), 'unavailable-chat');
+  assert.equal(elements.get('chat-list').value, '');
+  assert.equal(elements.get('chat-list-warning').hidden, false);
+  assert.match(elements.get('chat-list-warning').textContent, /Some Chats in this App/);
+  assert.match(elements.get('chat-list-warning').textContent, /unavailable-chat/);
+  assert.match(elements.get('chat-list-warning').textContent, /no replacement Chat was created/);
+  await fixture.checkSavedChats();
+  assert.equal(calls.lists.length, 4, 'explicit Check only repeats paged reads');
+  assert.deepEqual(calls.opens, []);
+  assert.equal(storage.getItem(savedKey), 'unavailable-chat');
+});
+
+test('pagination continues through a page with only unavailable Chats', async () => {
+  const {localApp, calls} = chatListHost([
+    {chats: [], unavailableChats: [{chatId: 'unavailable-1', code: 'chat_storage_uncertain'}], hasUncertainChats: true, nextCursor: '1'},
+    {chats: [{chatId: 'healthy-chat'}], unavailableChats: [], hasUncertainChats: true},
+  ]);
+  const {elements} = await boot({localApp});
+  assert.equal(calls.lists.length, 2);
+  assert.deepEqual(calls.opens, ['healthy-chat']);
+  assert.match(elements.get('chat-list-warning').textContent, /unavailable-1/);
+  assert.equal(elements.get('chat-list-warning').hidden, false);
+});
+
+test('missing uncertainty fields never mean healthy storage, and true is retained across pages', async (t) => {
+  for (const [name, pages, expected] of [
+    ['omitted fields', [{chats: []}], /did not confirm/],
+    ['empty unavailable array', [{chats: [], unavailableChats: []}], /did not confirm/],
+    ['App-wide true without page IDs', [{chats: [], unavailableChats: [], hasUncertainChats: true}], /Some Chats in this App/],
+    ['later omitted flag', [{chats: [], hasUncertainChats: true, nextCursor: '1'}, {chats: []}], /Some Chats in this App/],
+    ['later false flag', [{chats: [], hasUncertainChats: true, nextCursor: '1'}, {chats: [], hasUncertainChats: false}], /Some Chats in this App/],
+    ['page IDs with omitted flag', [{chats: [], unavailableChats: [{chatId: 'unavailable-1', code: 'chat_storage_uncertain'}]}], /Some Chats in this App/],
+  ]) {
+    await t.test(name, async () => {
+      const {localApp, calls} = chatListHost(pages);
+      const {elements} = await boot({localApp});
+      assert.match(elements.get('chat-list-warning').textContent, expected);
+      assert.equal(elements.get('chat-list-warning').hidden, false);
+      assert.deepEqual(calls.opens, []);
+    });
+  }
+});
+
+test('an explicitly clear list still cannot declare an absent saved Chat deleted or choose its replacement', async () => {
+  const savedKey = 'attachment-review:revision-rev-1:chatId';
+  const storage = new MemoryStorage([[savedKey, 'missing-chat']]);
+  const {localApp, calls} = chatListHost([{chats: [{chatId: 'other-chat'}], hasUncertainChats: false}]);
+  const {elements} = await boot({localApp, storage});
+  assert.deepEqual(calls.opens, []);
+  assert.equal(storage.getItem(savedKey), 'missing-chat');
+  assert.match(elements.get('chat-list-warning').textContent, /Saved Chat missing-chat is not currently available/);
+  assert.match(elements.get('chat-list-warning').textContent, /Check saved Chats again/);
+});
+
+test('all pages explicitly clear without a missing saved Chat need no uncertainty warning', async () => {
+  const {localApp} = chatListHost([
+    {chats: [], hasUncertainChats: false, nextCursor: '1'},
+    {chats: [{chatId: 'healthy-chat'}], hasUncertainChats: false},
+  ]);
+  const {elements} = await boot({localApp});
+  assert.equal(elements.get('chat-list-warning').hidden, true);
+});
+
+test('malformed list uncertainty is rejected rather than converted to a clean result', async () => {
+  for (const status of [{hasUncertainChats: 'false'}, {unavailableChats: [{chatId: '', code: 'chat_storage_uncertain'}]}]) {
+    const {localApp, calls} = chatListHost([{chats: [], ...status}]);
+    await assert.rejects(boot({localApp}), /invalid unavailable Chat status/);
+    assert.deepEqual(calls.opens, []);
+  }
 });
