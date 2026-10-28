@@ -531,7 +531,7 @@ test('persistent chat restores the same thread read-only and starts runs only fo
     'app.agent.createClient({threadId: task.threadId})', 'recoveryClient.connectAgent({runId: draft.runId}, recovery.subscriber)',
     'client.setMessages([message])', 'client.runAgent({', 'app.agent.file(file)',
     'runId: draft.runId', "'com.lingxi.localApp'", 'onRunErrorEvent', 'onRunFinishedEvent', 'metadata[\'com.lingxi.localApp\']',
-    "run.getOutcome() === 'cancelled'", 'client.abortRun()']) {
+    "run.getOutcome() === 'cancelled'", 'activeRunClient.abortRun()']) {
     assert.ok(source.includes(api), `attachment-chat example should use ${api}`);
   }
   const boot = source.slice(source.indexOf('async function boot()'), source.indexOf("$('attach').addEventListener"));
@@ -661,7 +661,7 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
   assert.equal(calls.starts, 0, 'RUN_ERROR recovery must not start a model request');
   assert.equal(fixture.pending(), draft, 'the exact retry input and run ID remain saved after RUN_ERROR');
   assert.match(elements.get('status').textContent, /Provider disconnected/);
-  assert.match(elements.get('status').textContent, /remain saved/);
+  assert.match(elements.get('status').textContent, /remain available/);
 
   window.dispatch('localApp:agent-handoff-error', {detail: {runId: 'run-1', code: 'pending_request_missing'}});
   assert.match(elements.get('status').textContent, /run-1/);
@@ -800,7 +800,7 @@ test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent co
   assert.match(reference, /task_not_found[\s\S]*?lookup miss/i);
   assert.match(reference, /pending_request_missing/);
   assert.match(reference, /outputSchema[\s\S]*?side effects/);
-  assert.match(reference, /finite OS execution lease/);
+  assert.match(reference, /finite and does not guarantee background completion/);
   assert.match(attachmentApp, /localApp:agent-handoff-error/);
   assert.match(attachmentApp, /pending_request_missing/);
   assert.match(attachmentApp, /original tab/);

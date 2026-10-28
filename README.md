@@ -66,6 +66,7 @@ To try a template by hand, copy it out first (the gate rejects build output insi
     ./scripts/check-all.sh
     node --test scripts/tests/test-local-app-r4-libs.mjs
     node --test scripts/tests/test-desktop-calorie-agent.mjs
+    node --test scripts/tests/test-attachment-chat-recovery.mjs
 
 ## History
 

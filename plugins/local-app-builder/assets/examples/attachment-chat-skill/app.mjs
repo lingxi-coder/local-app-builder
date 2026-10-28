@@ -8,6 +8,7 @@ let selectedFiles = [];
 let pendingDraft = null;
 let pendingRequestMissingRunId = null;
 let busy = false;
+let activeRunClient = null;
 let drafts = null;
 
 function showRecoveryWarning() {
@@ -99,8 +100,8 @@ function createRunId() {
   return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-async function clearExpiredDraft() {
-  if (!drafts || !pendingDraft || busy) return false;
+async function clearExpiredDraft(allowBusy = false) {
+  if (!drafts || !pendingDraft || (busy && !allowBusy)) return false;
   const saved = await drafts.get();
   if (saved || !drafts.expired) return false;
   pendingDraft = null;
@@ -113,21 +114,47 @@ async function clearExpiredDraft() {
   return true;
 }
 
+function mobileAgentStorageUnavailable() {
+  return info?.platform === 'mobile-browser' && !globalThis.indexedDB;
+}
+
+function hasOriginalMessage(draft) {
+  const message = draft?.message;
+  return typeof draft?.runId === 'string' && typeof draft.messageId === 'string'
+    && Array.isArray(draft.skills) && message?.id === draft.messageId && message.role === 'user'
+    && Array.isArray(message.content) && message.content.length > 0
+    && message.content.every((part) => part && (part.type === 'text'
+      ? typeof part.text === 'string'
+      : (part.type === 'image' || part.type === 'document') && typeof part.id === 'string'
+        && part.source?.type === 'data' && typeof part.source.value === 'string'));
+}
+
 function updateControls() {
   const hasChat = Boolean(chat && client);
-  $('send').disabled = !app || !hasChat || busy || (!pendingDraft && !($('prompt').value.trim() || selectedFiles.length));
-  $('send').textContent = pendingDraft ? 'Retry saved turn' : 'Send';
+  $('send').disabled = !app || !hasChat || busy || mobileAgentStorageUnavailable()
+    || (!pendingDraft && !($('prompt').value.trim() || selectedFiles.length));
+  $('send').textContent = pendingDraft ? (hasOriginalMessage(pendingDraft) ? 'Retry saved turn' : 'Check saved run') : 'Send';
   $('attach').disabled = busy || Boolean(pendingDraft);
   $('prompt').disabled = busy || Boolean(pendingDraft);
   $('use-skill').disabled = busy || Boolean(pendingDraft);
   $('chat-list').disabled = busy || Boolean(pendingDraft);
   $('new-chat').disabled = busy || Boolean(pendingDraft);
-  $('cancel').hidden = !busy || !client;
+  $('cancel').hidden = !activeRunClient;
   $('clear-draft').hidden = !pendingDraft || busy;
   $('archive-chat').disabled = busy || !chat || Boolean(pendingDraft);
   $('delete-chat').disabled = busy || !chat || Boolean(pendingDraft);
   $('draft').hidden = !pendingDraft;
-  if (pendingDraft) $('draft').textContent = `A turn is saved for explicit retry with run ID ${pendingDraft.runId}. Refresh will not send it automatically.`;
+  if (pendingDraft) $('draft').textContent = hasOriginalMessage(pendingDraft)
+    ? `A turn is saved with run ID ${pendingDraft.runId}. Retry checks the host first and may resend the unchanged input. Refresh will not send it automatically.`
+    : `The input for run ${pendingDraft.runId} is incomplete. Only a read-only host check is available.`;
+}
+
+function draftFileNames(draft) {
+  if (Array.isArray(draft.message?.content)) {
+    return draft.message.content.filter((part) => part?.type === 'image' || part?.type === 'document')
+      .map((part) => part.metadata?.['com.lingxi.localApp']?.filename || 'Attachment');
+  }
+  return [];
 }
 
 function messageParts(message) {
@@ -290,8 +317,8 @@ async function openChat(chatId) {
   updateControls();
 }
 
-async function recoverSavedRun(draft, history) {
-  const task = await getSavedTask(draft);
+async function recoverSavedRun(draft, history, savedTask) {
+  const task = savedTask || await getSavedTask(draft);
   if (!task || task.runId !== draft.runId || task.threadId !== chat.id) {
     throw new Error('The host could not confirm the saved run belongs to this Chat. The draft remains saved.');
   }
@@ -304,7 +331,7 @@ async function recoverSavedRun(draft, history) {
 
   if (recovery.getFailure()) {
     const failure = recovery.getFailure();
-    setStatus(`The saved AG-UI run failed: ${failure.message || 'The host reported RUN_ERROR.'}${failure.code ? ` (${failure.code})` : ''} The original input and run ID remain saved; no new model request was started.`);
+    setStatus(`The saved AG-UI run failed: ${failure.message || 'The host reported RUN_ERROR.'}${failure.code ? ` (${failure.code})` : ''} The draft and run ID remain available; no new model request was started.`);
     return false;
   }
   if (recovery.getOutcome() !== 'success') {
@@ -312,7 +339,7 @@ async function recoverSavedRun(draft, history) {
     const reason = outcome === 'cancelled' ? 'The saved run was cancelled.'
       : outcome === 'interrupt' ? 'The saved run paused for an interrupt.'
         : 'The host did not report a successful terminal event.';
-    setStatus(`${reason} The original input and run ID remain saved; no new model request was started.`);
+    setStatus(`${reason} The draft and run ID remain available; no new model request was started.`);
     return false;
   }
 
@@ -345,46 +372,68 @@ async function messageForDraft(draft) {
 }
 
 async function sendTurn() {
-  if (!client || busy) return;
-  if (await clearExpiredDraft()) return;
-  const draft = pendingDraft || {
-    chatId: chat.id,
-    runId: createRunId(),
-    messageId: createRunId(),
-    prompt: $('prompt').value.trim() || 'Review the attached files and list concrete questions.',
-    files: selectedFiles,
-    skills: $('use-skill').checked ? ['review'] : [],
-  };
-  if (draft.chatId !== chat.id) throw new Error('Open the saved Chat that owns this turn before retrying.');
-  if (draft.files.length > 8 || draft.files.some((file) => file.size > 25 * 1024 * 1024)
-      || draft.files.reduce((size, file) => size + file.size, 0) > 50 * 1024 * 1024) {
-    throw new Error('Choose up to eight files, 25 MiB each and 50 MiB total.');
-  }
-  if (draft.files.some((file) => typeof File !== 'function' || !(file instanceof File))) {
-    throw new Error('Attachments must be browser File objects.');
-  }
-
+  if (!client || busy || mobileAgentStorageUnavailable()) return;
+  // Lock before any asynchronous work so repeated clicks cannot create two run IDs.
+  busy = true;
+  updateControls();
   try {
-    if (!pendingDraft && drafts) await drafts.put(draft);
+    if (await clearExpiredDraft(true)) return;
+    const retrying = Boolean(pendingDraft);
+    const draft = pendingDraft || {
+      chatId: chat.id,
+      runId: createRunId(),
+      messageId: createRunId(),
+      prompt: $('prompt').value.trim() || 'Review the attached files and list concrete questions.',
+      files: selectedFiles,
+      skills: $('use-skill').checked ? ['review'] : [],
+    };
+    if (draft.chatId !== chat.id) throw new Error('Open the saved Chat that owns this turn before retrying.');
+    if (!retrying) {
+      if (draft.files.length > 8 || draft.files.some((file) => file.size > 25 * 1024 * 1024)
+          || draft.files.reduce((size, file) => size + file.size, 0) > 50 * 1024 * 1024) {
+        throw new Error('Choose up to eight files, 25 MiB each and 50 MiB total.');
+      }
+      if (draft.files.some((file) => typeof File !== 'function' || !(file instanceof File))) {
+        throw new Error('Attachments must be browser File objects.');
+      }
+      // agent.file generates a new ContentPart ID each time. Store the original
+      // message, not just File objects, so a retry preserves the exact input.
+      draft.message = await messageForDraft(draft);
+      delete draft.files;
+      if (drafts) await drafts.put(draft);
+    }
     pendingDraft = draft;
-    busy = true;
     updateControls();
     setStatus('Preparing official AG-UI user message…');
 
     const history = await readHistory();
     const alreadyInHistory = history.some((message) => message.id === draft.messageId);
-    if (alreadyInHistory) {
-      // The prior request may already be admitted. Reconnect and observe it; never submit again on refresh.
-      await recoverSavedRun(draft, history);
-      return;
+    if (retrying || alreadyInHistory) {
+      let task;
+      try { task = await getSavedTask(draft); }
+      catch (failure) {
+        // A history entry proves that this turn existed, even if its task is
+        // temporarily not visible. A lookup miss is otherwise still uncertain.
+        if (failure?.code !== 'task_not_found' || alreadyInHistory) throw failure;
+      }
+      if (task) {
+        await recoverSavedRun(draft, history, task);
+        return;
+      }
+      if (!hasOriginalMessage(draft)) {
+        throw new Error('The saved draft does not contain the complete original input. Check again, or forget it and explicitly create a new turn after reviewing any possible effects.');
+      }
+      setStatus('The saved run is not visible yet. Retrying the unchanged input with the same run ID by your request…');
     }
 
-    const message = await messageForDraft(draft);
+    const message = draft.message;
     // The Chat's Harness session already owns canonical history. Keep the full
     // transcript for display, but send only this new user message to the run.
     client.setMessages([message]);
     const run = subscriberForRun(client, history);
     setStatus('Sending the new turn in this persistent thread…');
+    activeRunClient = client;
+    updateControls();
     const response = await client.runAgent({
       runId: draft.runId,
       forwardedProps: {
@@ -415,8 +464,12 @@ async function sendTurn() {
     $('prompt').value = '';
   } catch (failure) {
     if (pendingDraft) await refreshHistory().catch(() => {});
-    setStatus(`${failure.message}${pendingDraft ? ' The exact input and run ID remain saved. No new model request was started automatically.' : ''}`);
+    const available = drafts ? 'saved in this browser' : 'available while this page stays open';
+    const detail = hasOriginalMessage(pendingDraft) ? ` The exact input and run ID remain ${available}.`
+      : pendingDraft ? ` The draft and run ID remain ${available}; the exact input is unavailable or incomplete.` : '';
+    setStatus(`${failure.message}${detail}${pendingDraft ? ' No new model request was started automatically.' : ''}`);
   } finally {
+    activeRunClient = null;
     busy = false;
     updateControls();
   }
@@ -432,14 +485,17 @@ async function boot() {
   if (info.recovery?.status === 'unavailable') showRecoveryWarning();
   drafts = globalThis.indexedDB ? new DraftStore(info.revision) : null;
   pendingDraft = drafts ? await drafts.get() : null;
-  if (pendingDraft?.files?.length) selectedFiles = pendingDraft.files;
   await loadChatList(pendingDraft?.chatId);
   if (!pendingDraft && drafts?.expired) setStatus('The saved retry draft expired after 24 hours and was deleted. It was not sent again automatically.');
-  else if (!drafts) setStatus('IndexedDB retry storage is unavailable. Online Agent use still works; a page refresh cannot restore a local draft.');
+  else if (!drafts) setStatus(mobileAgentStorageUnavailable()
+    ? 'IndexedDB is unavailable. This mobile host cannot submit Agent runs without it. Enable browser storage or reopen in a browser context that allows it.'
+    : 'IndexedDB draft storage is unavailable. A saved turn cannot be restored after refresh; Agent availability depends on this host.');
   if (pendingDraft) {
     $('prompt').value = pendingDraft.prompt;
-    $('file-names').textContent = pendingDraft.files?.map((file) => file.name).join(', ') || 'No files selected';
-    setStatus('A saved turn is ready. Choose Retry to reuse its run ID and original files.');
+    $('file-names').textContent = draftFileNames(pendingDraft).join(', ') || 'No files selected';
+    setStatus(hasOriginalMessage(pendingDraft)
+      ? 'A saved turn is ready. Choose Retry to check the host and reuse its run ID and original input.'
+      : 'The saved input is incomplete. Check the original run read-only before deciding what to do next.');
   }
   showPendingRequestMissing();
   updateControls();
@@ -458,18 +514,18 @@ $('chat-list').addEventListener('change', () => {
   if ($('chat-list').value) void openChat($('chat-list').value).catch((failure) => setStatus(failure.message));
 });
 $('cancel').addEventListener('click', () => {
-  if (!client || !busy) return;
-  client.abortRun();
+  if (!activeRunClient) return;
+  activeRunClient.abortRun();
   setStatus('Cancellation requested; waiting for the host terminal outcome.');
 });
 $('clear-draft').addEventListener('click', async () => {
-  if (!pendingDraft || busy || !confirm('Forget this saved turn? Any admitted run remains in Chat history and will not be cancelled.')) return;
+  if (!pendingDraft || busy || !confirm('Forget this saved turn? Any admitted run remains in Chat history and will not be cancelled. Any SDK handoff data is separate.')) return;
   if (drafts) await drafts.delete();
   pendingDraft = null;
   selectedFiles = [];
   $('file-names').textContent = 'No files selected';
   $('prompt').value = '';
-  setStatus('Saved retry draft removed. Any admitted run remains in durable Chat history.');
+  setStatus('Saved retry draft removed. Any admitted run and SDK handoff data are separate.');
   updateControls();
 });
 $('archive-chat').addEventListener('click', async () => {
