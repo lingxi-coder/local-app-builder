@@ -98,6 +98,14 @@ class DraftStore {
 }
 
 function setStatus(message) { $('status').textContent = message; }
+async function readChatData(read) {
+  try { return await read(); }
+  catch (failure) {
+    $('chat-list-warning').textContent = 'Agent or Chat data is unavailable or could not be verified. Existing data and saved identities were left untouched. Review the storage status in LingXi; this App will not automatically delete, reset or rebuild it.';
+    $('chat-list-warning').hidden = false;
+    throw failure;
+  }
+}
 function createRunId() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
@@ -214,7 +222,7 @@ async function fetchHistory(chatHandle) {
   do {
     const options = {limit: 50};
     if (cursor) options.cursor = cursor;
-    const page = await chatHandle.history(options);
+    const page = await readChatData(() => chatHandle.history(options));
     if (!page || !Array.isArray(page.messages)) throw new Error('The host returned invalid AG-UI history.');
     messages.push(...page.messages);
     cursor = page.nextCursor;
@@ -295,7 +303,7 @@ async function loadChatList(preferredId, confirmedChat = null) {
   do {
     const options = {limit: 50, includeArchived: false};
     if (cursor) options.cursor = cursor;
-    const page = await app.agent.chats.list(options);
+    const page = await readChatData(() => app.agent.chats.list(options));
     if (!page || !Array.isArray(page.chats)) throw new Error('The host returned invalid AG-UI chat summaries.');
     if ((page.hasUncertainChats !== undefined && typeof page.hasUncertainChats !== 'boolean')
         || (page.unavailableChats !== undefined && (!Array.isArray(page.unavailableChats)
@@ -359,7 +367,7 @@ async function checkSavedChats() {
 }
 
 async function openChat(chatId) {
-  chat = await app.agent.chats.open(chatId);
+  chat = await readChatData(() => app.agent.chats.open(chatId));
   if (chat.id !== chatId) throw new Error('The host returned a different Chat identity.');
   const messages = await fetchHistory(chat);
   client = app.agent.createClient({threadId: chat.id, initialMessages: messages});
@@ -436,7 +444,7 @@ async function acceptCreatedChat(created) {
 
 async function checkCreationStatus() {
   if (!pendingCreation) throw new Error(creationStorageProblem || 'No saved Chat creation ID is available. Review saved Chats before explicitly creating a new one.');
-  const created = await app.agent.chats.creationStatus(originalCreationOptions(pendingCreation));
+  const created = await readChatData(() => app.agent.chats.creationStatus(originalCreationOptions(pendingCreation)));
   if (created) await acceptCreatedChat(created);
   else setStatus('The saved Chat is not visible yet. The original request may still be in flight. Nothing was resubmitted; check again or explicitly retry the same request.');
   return created;

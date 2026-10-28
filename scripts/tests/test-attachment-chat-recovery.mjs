@@ -554,3 +554,39 @@ test('malformed list uncertainty is rejected rather than converted to a clean re
     assert.deepEqual(calls.opens, []);
   }
 });
+
+test('unavailable whole-store reads retain data and identity without guessing a repair from error codes', async (t) => {
+  for (const message of ['Existing Agent storage format is unsupported', 'Existing Agent storage format is missing', 'Existing Chat storage format cannot be verified']) {
+    await t.test(message, async () => {
+      const original = JSON.stringify({requestId: creationId, title: 'Keep original'});
+      const entries = [[creationKey, original], ['attachment-review:revision-rev-1:chatId', 'saved-chat'], ['business-data', 'preserved']];
+      const storage = new MemoryStorage(entries);
+      const localApp = creationHost({
+        async create() { assert.fail('an unreadable store is not an empty store to recreate'); },
+        async creationStatus() { assert.fail('whole-store failure cannot trigger another operation'); },
+      });
+      localApp.agent.chats.list = async () => { throw new Error(message); }; // No platform error-code matching.
+      localApp.agent.chats.delete = async () => { assert.fail('failure cannot delete host data'); };
+      const {fixture, elements} = await boot({localApp, storage, initialize: false});
+      await assert.rejects(fixture.initialize(), new RegExp(message));
+      assert.deepEqual([...storage.records], entries);
+      assert.equal(elements.get('chat-list-warning').hidden, false);
+      assert.match(elements.get('chat-list-warning').textContent, /data is unavailable or could not be verified/);
+      assert.match(elements.get('chat-list-warning').textContent, /not automatically delete, reset or rebuild/);
+      assert.equal(fixture.pendingCreation().requestId, creationId);
+      await fixture.createChat();
+      assert.deepEqual([...storage.records], entries, 'failed initialization never permits replacement creation');
+    });
+  }
+});
+
+test('a history-read failure leaves the original saved Chat and creation intent intact', async () => {
+  const entries = [[creationKey, JSON.stringify({requestId: creationId})], ['attachment-review:revision-rev-1:chatId', 'saved-chat']];
+  const storage = new MemoryStorage(entries);
+  const {localApp} = chatListHost([{chats: [{chatId: 'saved-chat'}], hasUncertainChats: false}]);
+  localApp.agent.chats.open = async (id) => ({id, async history() { throw new Error('Cannot verify existing storage'); }});
+  const {fixture, elements} = await boot({localApp, storage, initialize: false});
+  await assert.rejects(fixture.initialize(), /Cannot verify existing storage/);
+  assert.deepEqual([...storage.records], entries);
+  assert.match(elements.get('chat-list-warning').textContent, /Existing data and saved identities were left untouched/);
+});
