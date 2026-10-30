@@ -12,29 +12,6 @@ const agent = window.localApp?.agent;
 $('host-open').hidden = typeof window.localApp?.host?.open !== 'function';
 $('host-open').addEventListener('click', () => window.localApp?.host?.open());
 
-function clearOldAgentCaches() {
-  for (const getStorage of [() => globalThis.localStorage, () => globalThis.sessionStorage]) {
-    try {
-      const storage = getStorage();
-      for (let index = storage.length - 1; index >= 0; index--) {
-        const key = storage.key(index);
-        if (key && /^(?:revision-\d+:)?meal-notes\.agent\.(pending|run)$/.test(key)) storage.removeItem(key);
-      }
-    } catch {}
-  }
-  try {
-    const indexedDb = globalThis.indexedDB;
-    if (!indexedDb) return;
-    const request = indexedDb.deleteDatabase('meal-notes-agent-drafts');
-    request.onerror = () => console.warn('Could not remove the retired meal Agent draft database.');
-    request.onblocked = () => console.warn('The retired meal Agent draft database is still open in another tab.');
-  } catch {
-    // Removing the retired cache is optional; storage denial must not block the App UI.
-    console.warn('Could not access the retired meal Agent draft database.');
-  }
-}
-clearOldAgentCaches();
-
 let hostError = '';
 if (agent) {
   try {

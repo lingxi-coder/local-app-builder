@@ -63,7 +63,7 @@ class FakeWindow {
   listenerCount(type) { return this.listeners.get(type)?.size ?? 0; }
 }
 
-async function bootCalorieApp({agent, modelContext, storage, indexedDB, indexedDBGetter, warnings = []} = {}) {
+async function bootCalorieApp({agent, modelContext, storage} = {}) {
   const base = new URL('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/', import.meta.url);
   let source = await readFile(new URL('app.mjs', base), 'utf8');
   source = source
@@ -128,29 +128,25 @@ async function bootCalorieApp({agent, modelContext, storage, indexedDB, indexedD
     setItem(_key, value) { this.value = value; },
     removeItem() {},
   };
-  const sessionStorage = {length: 0, key: () => null, getItem: () => null, setItem() {}, removeItem() {}};
   const localApp = {
     info: async () => ({hostPlatform: 'macos'}),
     ...(agent ? {agent} : {}),
   };
   const window = new FakeWindow();
   window.localApp = localApp;
-  const context = {localApp, localStorage, sessionStorage};
-  if (indexedDBGetter) Object.defineProperty(context, 'indexedDB', {get: indexedDBGetter});
-  else if (indexedDB !== undefined) context.indexedDB = indexedDB;
+  const context = {localApp, localStorage};
   const nutrition = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/nutrition.mjs');
   const webmcp = await import('../../plugins/local-app-builder/assets/examples/desktop-calorie-agent/webmcp.mjs');
   const crypto = {randomUUID: (() => { let id = 0; return () => `meal-run-${++id}`; })()};
-  const console = {warn: (...args) => warnings.push(args)};
   class File { constructor() { this.name = 'meal-photo.jpg'; this.type = 'image/jpeg'; this.size = 1; } }
   const url = {createObjectURL: () => 'blob:meal-photo', revokeObjectURL() {}};
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const runApp = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'sessionStorage', 'nutrition', 'webmcp', 'crypto', 'console', 'File', 'Event', 'URL',
+  const runApp = new AsyncFunction('globalThis', 'document', 'window', 'localStorage', 'nutrition', 'webmcp', 'crypto', 'File', 'Event', 'URL',
     `const {nutritionSchema, recognitionPrompt, checkedResult, calorieRange, mealRecord} = nutrition;\n`
       + `const {applyUnsavedMealPortion, registerMealWebMcp, summarizeMealDraft, summarizeSavedMealRecords} = webmcp;\n`
       + `${source}\nreturn {document, window, click: (id) => document.getElementById(id).click(), prepareImage: () => showPhoto(new File()), state: () => ({result, completedRunId, busy})};`);
-  const app = await runApp(context, document, window, localStorage, sessionStorage, nutrition, webmcp, crypto, console, File, Event, url);
-  return {...app, storage: localStorage, modelContext, warnings};
+  const app = await runApp(context, document, window, localStorage, nutrition, webmcp, crypto, File, Event, url);
+  return {...app, storage: localStorage, modelContext};
 }
 
 async function waitFor(predicate, message) {
@@ -484,20 +480,6 @@ test('WebMCP missing or denied is reported without disabling the manual meal UI'
   );
 });
 
-test('legacy IndexedDB cleanup failure cannot abort ordinary App startup', async () => {
-  for (const config of [
-    {indexedDBGetter: () => { throw new Error('IndexedDB getter denied'); }},
-    {indexedDB: {deleteDatabase() { throw new Error('IndexedDB delete denied'); }}},
-  ]) {
-    const warnings = [];
-    const app = await bootCalorieApp({...config, warnings});
-    assert.ok(warnings.length > 0, 'cleanup failure is recorded for diagnostics');
-    for (const id of ['photo-choose', 'camera-open', 'analyze', 'save']) {
-    assert.ok(app.document.getElementById(id).listeners.get('click')?.size);
-    }
-  }
-});
-
 test('oversized locally edited history is rejected by the app tool without a storage write', async () => {
   const modelContext = new FakeModelContext();
   const malformed = mealRecord(checkedResult(result()), [{name: 'Rice', grams: 150}], 'oversized-record');
@@ -671,7 +653,7 @@ test('a refreshed chat reconnects a saved run by task identity and preserves RUN
   assert.equal(fixture.pending(), draft, 'the original draft and run ID remain available');
 });
 
-test('a persistent Chat run sends only its new user Message, not historical File bytes', async () => {
+test('persistent Chat sends only each new user Message and selects Skills independently per run', async () => {
   const base = new URL('../../plugins/local-app-builder/assets/examples/attachment-chat-skill/', import.meta.url);
   const original = await readFile(new URL('app.mjs', base), 'utf8');
   const source = original.replace(/\nvoid boot\(\)\.catch\(\(failure\) => setStatus\(failure\.message\)\);\s*$/, '');
@@ -710,8 +692,11 @@ test('a persistent Chat run sends only its new user Message, not historical File
   let history = [
     {id: 'old-user', role: 'user', content: [
       {type: 'text', text: 'Review this earlier file.'},
-      {type: 'document', source: {type: 'data', value: oldFileBytes, mimeType: 'text/plain'}, metadata: {filename: 'old.txt'}},
+      {type: 'document', id: 'old-file-part', source: {type: 'data', value: oldFileBytes, mimeType: 'text/plain'},
+        metadata: {'com.lingxi.localApp': {version: 1, filename: 'old.txt'}}},
     ]},
+    {id: 'old-call', role: 'assistant', toolCalls: [{id: 'old-tool-call', type: 'function', function: {name: 'read_file', arguments: '{}'}}]},
+    {id: 'old-tool-result', role: 'tool', toolCallId: 'old-tool-call', content: 'Prior tool result stays in host history.'},
     {id: 'old-assistant', role: 'assistant', content: 'The earlier file was reviewed.'},
   ];
   const calls = {runInputs: [], clients: []};
@@ -740,7 +725,7 @@ test('a persistent Chat run sends only its new user Message, not historical File
               forwardedProps: parameters.forwardedProps,
             };
             calls.runInputs.push(input);
-            const newAssistant = {id: 'new-assistant', role: 'assistant', content: 'The new turn was reviewed.'};
+            const newAssistant = {id: `new-assistant-${calls.runInputs.length}`, role: 'assistant', content: 'The new turn was reviewed.'};
             history = [...history, ...structuredClone(this.messages), newAssistant];
             await subscriber.onRunFinishedEvent({outcome: 'success'});
             return {result: undefined, newMessages: [newAssistant]};
@@ -758,6 +743,7 @@ test('a persistent Chat run sends only its new user Message, not historical File
     `${source}\nawait boot();\nreturn {sendTurn};`);
   const fixture = await runFixture(context, document, {addEventListener() {}}, localStorage, class File {}, () => false, () => 0, Option);
   elements.get('prompt').value = 'Review only the new turn.';
+  elements.get('use-skill').checked = true;
 
   await fixture.sendTurn();
 
@@ -767,8 +753,19 @@ test('a persistent Chat run sends only its new user Message, not historical File
   assert.equal(calls.runInputs[0].messages[0].role, 'user');
   assert.equal(calls.runInputs[0].messages[0].content[0].text, 'Review only the new turn.');
   assert.equal(JSON.stringify(calls.runInputs[0]).includes(oldFileBytes), false, 'historical file bytes must not be sent again');
-  assert.equal(history.length, 4, 'history remains canonical and includes both completed turns');
+  assert.equal(JSON.stringify(calls.runInputs[0]).includes('Prior tool result'), false, 'a tool result never becomes a new user turn');
+  assert.deepEqual(calls.runInputs[0].forwardedProps['com.lingxi.localApp'].skills, ['review']);
+  assert.equal(history.length, 6, 'the original user, tool and assistant history remains intact');
   assert.equal(calls.clients.length, 1, 'the same persistent thread client is reused for the new turn');
+
+  elements.get('use-skill').checked = false;
+  elements.get('prompt').value = 'Continue without the review Skill.';
+  await fixture.sendTurn();
+  assert.equal(calls.runInputs.length, 2);
+  assert.notEqual(calls.runInputs[1].runId, calls.runInputs[0].runId);
+  assert.deepEqual(calls.runInputs[1].messages.map(message => message.role), ['user']);
+  assert.deepEqual(calls.runInputs[1].forwardedProps['com.lingxi.localApp'].skills, [], 'a later turn never inherits the previous Skill selection');
+  assert.equal(history.length, 8, 'new successful turns append without replacing original history');
 });
 
 test('plugin metadata and generator guidance name AG-UI 1.0 as the only Agent contract', async () => {

@@ -51,11 +51,8 @@ class DraftStore {
   open() {
     if (!globalThis.indexedDB) return Promise.reject(new Error('This browser cannot persist a retry draft.'));
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open('attachment-review-drafts', 2);
-      request.onupgradeneeded = (event) => {
-        if (!request.result.objectStoreNames.contains('drafts')) request.result.createObjectStore('drafts', {keyPath: 'key'});
-        else if (event.oldVersion < 2) request.transaction.objectStore('drafts').clear();
-      };
+      const request = indexedDB.open('attachment-review-agui-v1-drafts', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('drafts', {keyPath: 'key'});
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error || new Error('Could not open saved drafts.'));
       request.onblocked = () => reject(new Error('Saved drafts are busy in another tab.'));
@@ -614,8 +611,9 @@ async function sendTurn() {
     }
 
     const message = draft.message;
-    // The Chat's Harness session already owns canonical history. Keep the full
-    // transcript for display, but send only this new user message to the run.
+    // The host keeps original successful history and manages context summaries.
+    // Keep history for display; tool results stay inside their run, and this
+    // request sends only the new user message.
     client.setMessages([message]);
     const run = subscriberForRun(client, history);
     setStatus('Sending the new turn in this persistent thread…');

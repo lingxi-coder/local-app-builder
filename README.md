@@ -8,6 +8,8 @@ This plugin contains skills and template assets. It uses ordinary Bash/Read/Writ
 
 Hosts that expose `window.localApp.agent` use AG-UI 1.0 `RunAgentInput`, `Message`, `ContentPart`, `BaseEvent` and the official JavaScript client. A host helper turns a browser `File` into a standard content part. Model selection, provider credentials, host tools and approvals stay in trusted LingXi UI; the chat that created an App is not the App's Agent context.
 
+Persistent Chat history and file assets belong to the host. It retains the original successful transcript and prepares controlled summaries for bounded model context. Apps send only each new user Message; tool results continue their current Agent run. Apps do not compress or rebuild tool history, and select approved Skills independently for each run. Only current schema 2 and AG-UI formats are supported, with no old-store conversion or pending-data cleanup hooks.
+
 Interactive Apps also expose selected business operations through official WebMCP `document.modelContext`. The existing create-local-app skill covers registration, input validation, lifecycle and discovery/call checks for both Create and Modify. Host injection supplies the pinned polyfill on Desktop and Mobile static pages; Mobile server pages explicitly load `/__host/webmcp.js` before App scripts. Browser integrations remain user-installed choices in Public settings. No additional Skill, MCP server or global debugging port is bundled here.
 
 The repository is public (`lingxi-coder/local-app-builder`) and licensed under the MIT License (see `LICENSE`).

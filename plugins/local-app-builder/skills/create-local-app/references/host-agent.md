@@ -4,6 +4,8 @@ The host's built-in `local-app` skill and current native capability advertisemen
 
 The host owns model selection, provider credentials, authorization, tool execution, approval and questions. An App runs with the model selected for that App; it never inherits the chat that created it. Never call an LLM provider from page code or put provider credentials, host settings or connection details in an App.
 
+Use schema 2 source packages and only the current AG-UI Agent and browser pending-store format. Do not add compatibility aliases, fallback decoders, old-store migrations or startup cleanup of old pending records. An unavailable host store remains unavailable; the App does not convert or rebuild it.
+
 ## AG-UI input and host options
 
 An AG-UI 1.0 `RunAgentInput` has required `threadId`, `runId` and ordered `messages: Message[]`; it may also carry `protocolVersion`, `state`, `tools`, `context`, `forwardedProps` and `resume`. Use the official definitions from `@ag-ui/core` when type-checking TypeScript. Keep the full protocol input and its standard fields intact.
@@ -26,6 +28,8 @@ const forwardedProps = {
 The first-release stateless run profile accepts exactly one user `Message` on a fresh `threadId`/`runId`. Do not send an existing assistant transcript to a stateless run or reuse its client after it has accumulated assistant messages. Use a host Chat resource when the user needs multiple turns and durable history. AG-UI syntax alone does not imply host support: this profile rejects top-level `tools`, `context`, `state` and `resume`; remote-URL and provider-file-handle sources; and `audio` and `video` content parts. For local files, use only the standard content part returned by `agent.file(file)`.
 
 Do not put host settings in AG-UI `metadata`. The top-level AG-UI `tools` field describes frontend tools that the App itself executes. It is not a host permission grant. To request host tools, discover exact opaque public IDs with `LocalApp({"action":"agent_catalog"})` from the creating chat, declare them in the App release and pass the approved IDs in the namespaced extension. The catalog is read-only and grants nothing. A packaged Skill is immutable instruction text declared in the manifest and selected by its ID in the same extension. Skills grant no tools. Host policy rechecks the release, requested IDs, user grant, platform and enterprise restrictions for every run.
+
+Skills are scoped to the selected run, including each turn of a persistent Chat. Supply the approved Skill IDs again when the user selects them for that new run; omitting an ID does not carry its previous instructions or grants forward. Historical Chat content remains conversation data, not active Skill authority. Keep an exact retry's original Skill selection with its immutable input.
 
 `threadId` names a conversation; `runId` names one run in that conversation. Use a new random `threadId` for an independent one-shot request. Reuse the stable ID returned by the host Chat resource for a persistent conversation. Supply a new random `runId` for each new turn. Keep that Agent `runId` distinct from the Local App launch `runId` returned by Mobile `localApp.info()`. If delivery is uncertain, keep the original Agent IDs and exact input for a user-initiated same-ID retry; never silently replace it with a new run.
 
@@ -99,6 +103,8 @@ Every incoming event is an official `BaseEvent` union member. Events include run
 
 ## Persistent Chat threads
 
+The host saves the original successful conversation and file assets in its canonical Chat history. Tool calls and results remain part of their Agent run; they are never new user turns. As history grows, the host creates controlled summaries for bounded model context while retaining the original transcript. The App displays official history and submits only a new user Message; it must not compact the conversation, splice tool results into prompts or reconstruct model history. Context, asset, turn, duration and OS limits still apply, so this does not promise unlimited conversation length or background lifetime.
+
 The host Chat resource creates a stable thread ID and maps that ID to its durable Harness Session. Chat creation is a host resource API, not an AG-UI standard operation. The current API is `agent.chats.create({requestId, title?})`; `requestId` is a required browser-generated lowercase canonical UUIDv4, and the returned handle's `id` equals that request ID. When present, `title` must be a string. Save the original options durably **before** the first submission, preserving exact whitespace and the distinction between an omitted title and an explicitly supplied title. Do not regenerate the ID, normalize the title, or fill in an omitted title on retry. The same ID with the same original input returns the same Chat; conflicting input rejects with `chat_create_conflict`, and a deleted creation rejects with `chat_create_deleted` rather than resurrecting it. There is no API compatibility path for a creation without `requestId`.
 
 Create only from a user's explicit **New Chat** action. For example, after checking there is no unresolved saved creation:
@@ -164,13 +170,13 @@ const response = await client.runAgent({
   }
 }, subscriber);
 
-// The host Chat's durable Harness Session already owns the prior conversation.
+// The host owns original history and controlled model-context summaries.
 history = await readAllHistory(chat);
 client.setMessages(history);
 renderMessages(history);
 ```
 
-Do not resend the historical user/assistant messages or their File bytes on every turn. The host Chat's stable `threadId` selects its canonical Harness transcript; `RunAgentInput.messages` supplies only the new user message. Replaying old files can exceed the 116 MiB run-input limit even though each new message is within its attachment limit and the Chat remains below its larger asset-storage cap. Do not create a new Chat or thread for each turn. To reconnect to the host's read-only stream/history, use the host adapter's `connectAgent({runId})` implementation with a fresh client that has no `initialMessages`; it replays existing protocol events and does not create a model request. `connectAgent()` is for restoration, while `runAgent()` is only for a user-submitted turn.
+Do not resend historical user, assistant or tool messages or their File bytes on every turn. The host Chat's stable `threadId` selects its canonical Harness transcript; `RunAgentInput.messages` supplies only the new user message. Replaying old files can exceed the 116 MiB run-input limit even though each new message is within its attachment limit and the Chat remains below its larger asset-storage cap. Do not create a new Chat or thread for each turn. To reconnect to the host's read-only stream/history, use the host adapter's `connectAgent({runId})` implementation with a fresh client that has no `initialMessages`; it replays existing protocol events and does not create a model request. `connectAgent()` is for restoration, while `runAgent()` is only for a user-submitted turn.
 
 The host Chat history is paged as `{messages: Message[], nextCursor?}`. Continue with the returned cursor until all needed pages have been read before replacing the client history; `chats.list` summaries identify a resource with `chatId`, while an opened Chat handle's `id` is its AG-UI `threadId`. Do not present one page as the entire conversation. Messages use the official `Message[]` union, not a parallel `{text,attachments}` model. Read content from the message's string or ordered `ContentPart[]`; do not assume every message is plain text. A Chat ID is an opaque app-scoped conversation identity, not a credential or provider ID. Host tools still require their separate trusted UI grant.
 
